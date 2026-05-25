@@ -29,7 +29,7 @@ Below is the actual README, now that I have gotten my schpiel out of the way.
 - **Static home page -** Pick a day and time to refresh; until then the home page doesn't change.
 - **Three refresh cadences -** Weekly, multiple days per week, or daily.
 - **Distraction cleanup -** Hide Shorts, watch-page recommendations, end-screen cards, autoplay, live chat, side panel, comments, notification bell, mix/radio playlists,
-  voice search, Create button, Explore/Trending, Mix Radio playlists, and more.
+  voice search, Create button, Explore/Trending, and more.
 - **Daily watch limit -** Cap by video count, watch-time, or both. Grace 
   ("5 more minutes" or "finish this video" for example) when you hit your set limit.
 - **Modes -** Switch between Watch (your custom home page with your set daily-limit), Work (distraction-free work mode), and Listen (coming soon; a music listening mode).
