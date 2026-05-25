@@ -48,12 +48,11 @@ Below is the actual README, now that I have gotten my schpiel out of the way.
 
 ### From source (beta development)
 
-1. Clone or download this repo.
+1. Clone or [download](https://github.com/IBN-5100-tan/BetterFeed-Chrome-Extension/archive/refs/heads/main.zip) this repo.
 2. Open `chrome://extensions` in Chrome / Brave / Edge / any Chromium browser.
 3. Toggle **Developer mode** on (top right).
-4. Click **Load unpacked** and choose this folder.
-5. Open `youtube.com` — you should land on the custom home page (after the
-   one-time mode picker and an initial recommendation scrape).
+4. Click **Load unpacked** and choose the folder **BetterFeed-Chrome-Extension-main**.
+5. The welcome page should open where you can configure settings and head to `youtube.com`.
 
 ### From the Chrome Web Store
 
