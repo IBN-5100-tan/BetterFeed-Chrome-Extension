@@ -1,0 +1,158 @@
+/* Loaded at document_start by the manifest, before any DOM is parsed.
+   Hides YouTube's native home grid so it can never visually appear
+   before the weekly grid takes over.
+
+   When the extension is disabled OR the weekly home option is off,
+   content.js adds the better-feed-show-native-home class to <html>,
+   which makes the :not() selector below stop matching — leaving
+   YouTube's own stylesheet free to render the grid normally. */
+
+html:not(.better-feed-show-native-home)
+  ytd-browse[page-subtype="home"] ytd-rich-grid-renderer {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  z-index: -1 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* When the marker URL is active, hide the library content immediately
+   so it never flashes before the weekly grid is injected. The
+   better-feed-marker-mode class is set by early.js at document_start. */
+html.better-feed-marker-mode ytd-browse > *:not(#better-feed-home) {
+  display: none !important;
+}
+
+/* Work mode: search-only experience. Hide all video grids on home,
+   subscriptions, library, trending, etc. Channel pages are deliberately
+   carved out (via :not([page-subtype*="channel"])) so that when the
+   user confirms a channel-click prompt, the channel renders normally.
+   Search results (ytd-search) and watch pages (ytd-watch-flexy) don't
+   use ytd-browse so they're unaffected. */
+html.better-feed-work-mode ytd-browse:not([page-subtype*="channel"]) > *:not(#better-feed-home) {
+  display: none !important;
+}
+
+/* Work mode: hide the Subscriptions section from the sidebar.
+   YouTube structures subscription channels as direct children of the top
+   ytd-guide-section-renderer > #items, while items inside the "You"
+   section ("Your channel", History, etc.) are nested one level deeper in
+   ytd-guide-collapsible-section-entry-renderer > #section-items — so the
+   child combinator below catches the subs without touching You. */
+
+/* The "Subscriptions ▾" collapsible header (links to /feed/subscriptions) */
+html.better-feed-work-mode ytd-guide-collapsible-section-entry-renderer:has(a[href="/feed/subscriptions"]) {
+  display: none !important;
+}
+
+/* The individual subscribed-channel entries */
+html.better-feed-work-mode ytd-guide-section-renderer > #items > ytd-guide-entry-renderer:has(a[href^="/@"]),
+html.better-feed-work-mode ytd-guide-section-renderer > #items > ytd-guide-entry-renderer:has(a[href*="/channel/"]) {
+  display: none !important;
+}
+
+/* The Show more / Show less toggle that sits between the last subscribed
+   channel and the next section. Targeted only when it follows a channel
+   entry, so Explore/More-from-YouTube toggles are left alone. */
+html.better-feed-work-mode ytd-guide-section-renderer > #items > ytd-guide-entry-renderer:has(a[href^="/@"]) ~ ytd-guide-collapsible-entry-renderer,
+html.better-feed-work-mode ytd-guide-section-renderer > #items > ytd-guide-entry-renderer:has(a[href*="/channel/"]) ~ ytd-guide-collapsible-entry-renderer {
+  display: none !important;
+}
+
+/* The Home entry at the top of the sidebar — nothing to land on in Work mode */
+html.better-feed-work-mode ytd-guide-section-renderer > #items > ytd-guide-entry-renderer:has(a[href="/"]) {
+  display: none !important;
+}
+
+/* Collapsed sidebar: hide every mini-guide icon (Home/Shorts/Subscriptions/You).
+   Includes the container and the older #mini-guide id selectors so YT can't
+   leak any of them through a renamed wrapper.
+
+   Applied to Watch mode as well as Work mode — Watch mode's expanded sidebar
+   still works normally (ytd-guide-renderer is untouched), but collapsing it
+   should leave an empty rail rather than a column of YouTube nav icons. */
+html.better-feed-work-mode ytd-mini-guide-renderer,
+html.better-feed-work-mode ytd-mini-guide-entry-renderer,
+html.better-feed-work-mode #mini-guide,
+html.better-feed-work-mode #mini-guide-content,
+html.better-feed-watch-mode ytd-mini-guide-renderer,
+html.better-feed-watch-mode ytd-mini-guide-entry-renderer,
+html.better-feed-watch-mode #mini-guide,
+html.better-feed-watch-mode #mini-guide-content {
+  display: none !important;
+}
+
+/* Hiding the mini-guide above leaves ytd-page-manager with its reserved
+   left gutter intact (YouTube applies the gutter via a CSS variable on
+   ytd-app, not the rendered mini-guide width). Zero the variable and the
+   margin on the marker-mode weekly home so the grid sits centered in the
+   viewport rather than offset ~72px to the right.
+
+   Two guards keep this from firing when the sidebar is actually being
+   shown:
+     :not([guide-persistent-and-visible]) — skip when the expanded sidebar
+       is pinned inline on wide screens (it pushes content right with
+       --ytd-guide-width, which we shouldn't reclaim).
+     :not(:has(tp-yt-app-drawer[opened])) — skip when the drawer overlay
+       is open. The drawer is fixed-position, so without this guard the
+       page-manager slides flush-left under the drawer and the grid
+       overlaps the sidebar items. */
+html.better-feed-watch-mode.better-feed-marker-mode
+  ytd-app:not([guide-persistent-and-visible]):not(:has(tp-yt-app-drawer[opened])) {
+  --ytd-mini-guide-width: 0px !important;
+  --ytd-app-mini-guide-width: 0px !important;
+}
+html.better-feed-watch-mode.better-feed-marker-mode
+  ytd-app:not([guide-persistent-and-visible]):not(:has(tp-yt-app-drawer[opened]))
+  ytd-page-manager {
+  margin-left: 0 !important;
+}
+
+/* Work mode: with Home/Subscriptions gone, collapse the dividers and empty
+   space so the "You" section sits flush at the top of the sidebar. */
+html.better-feed-work-mode ytd-guide-renderer hr,
+html.better-feed-work-mode ytd-guide-renderer #separator {
+  display: none !important;
+}
+html.better-feed-work-mode ytd-guide-section-renderer,
+html.better-feed-work-mode ytd-guide-section-renderer > #items,
+html.better-feed-work-mode ytd-guide-collapsible-section-entry-renderer {
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+  padding-top: 0 !important;
+  margin-top: 0 !important;
+}
+
+/* See-you-tomorrow state (daily limit reached, Watch mode home). Hide the
+   entire left sidebar — both the expanded drawer and the collapsed
+   mini-guide — the same way Work mode hides the mini-guide. */
+html.better-feed-see-you-tomorrow ytd-guide-renderer,
+html.better-feed-see-you-tomorrow ytd-mini-guide-renderer,
+html.better-feed-see-you-tomorrow ytd-mini-guide-entry-renderer,
+html.better-feed-see-you-tomorrow #guide,
+html.better-feed-see-you-tomorrow #mini-guide,
+html.better-feed-see-you-tomorrow #mini-guide-content,
+html.better-feed-see-you-tomorrow tp-yt-app-drawer {
+  display: none !important;
+}
+
+/* Before content.js has determined the mode and rendered the right UI,
+   hide YouTube's entire app shell so masthead/library never flash through.
+   content.js removes better-feed-pre-ready once the mode-aware UI is up.
+   ytd-app uses opacity (not visibility) so removing the class fades the
+   app shell in over 220ms instead of popping it in. */
+ytd-app {
+  transition: opacity 220ms ease-in;
+}
+html.better-feed-pre-ready {
+  background: #0f0f0f !important;
+}
+html.better-feed-pre-ready ytd-app {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+@media (prefers-color-scheme: light) {
+  html.better-feed-pre-ready { background: #f9f9f9 !important; }
+}

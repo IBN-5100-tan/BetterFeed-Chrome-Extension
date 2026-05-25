@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "BetterFeed",
+  "version": "0.1",
+  "description": "Freezes YouTube recommendations on a weekly schedule.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt/uwEeH2VSvy88HLMQftJzC2LcK3793JmZ7Hqvm0BzM8MHRHgrOi5jmvZGx3GLZlz9rXv+mL4eo/R5jTU58XA9xp7OegmzGeZDwi7Cj3BV/mNNPZ0X3Wu/y4ojgTXBGI1J4IDVcGrTCTA/A8uvpPPdpj0epgF1H90YmUaTi29GgiSs7sIkPiex70KTfGhJ1fE4P6a8CcfBIkQC2iYXKORqt7Eh4lx8ZOI73ZBSR2i5O8RzFQ2MzGksaeYcbF9PJjFp/Du81GYicFbfMTDZp5apTjlGKGOGFFerGiR9qVWjQo4obk2+xfosHYO+reMo1L3dx5Hwoxh3aUbvMXp0NfIQIDAQAB",
+  "permissions": ["storage", "declarativeNetRequest", "alarms"],
+  "host_permissions": ["*://www.youtube.com/*"],
+  "action": {
+    "default_title": "BetterFeed Settings",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://www.youtube.com/*"],
+      "js": ["early.js"],
+      "css": ["preload.css"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://www.youtube.com/*"],
+      "js": ["shared.js", "content.js"]
+    }
+  ]
+}

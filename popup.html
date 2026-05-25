@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 320px;
+      background: #1f1f1f;
+      color: #f1f1f1;
+      font-family: Roboto, Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+
+    .header {
+      padding: 16px;
+      border-bottom: 1px solid #333;
+    }
+
+    .header h2 {
+      margin: 0;
+      font-size: 18px;
+      color: #f1f1f1;
+    }
+
+    .menu {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px;
+    }
+
+    .menu-item {
+      padding: 12px 16px;
+      background: #282828;
+      border: none;
+      color: #f1f1f1;
+      font-size: 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .menu-item:hover {
+      background: #333;
+    }
+
+    .menu-item-icon {
+      font-size: 16px;
+      width: 20px;
+      text-align: center;
+    }
+
+    .content {
+      display: none;
+      padding: 16px;
+      border-top: 1px solid #333;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .content.active {
+      display: block;
+    }
+
+    .content h3 {
+      margin: 0 0 12px 0;
+      font-size: 16px;
+      color: #f1f1f1;
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 16px;
+      color: #f1f1f1;
+      font-size: 14px;
+    }
+
+    label span {
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+
+    label.checkbox-label {
+      flex-direction: row;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      cursor: pointer;
+    }
+
+    label.checkbox-label span {
+      margin: 0;
+      font-weight: 400;
+    }
+
+    label.checkbox-label input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      padding: 0;
+      accent-color: #3ea6ff;
+      cursor: pointer;
+    }
+
+    select, input {
+      padding: 8px;
+      background: #202020;
+      border: 1px solid #444;
+      color: #f1f1f1;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: Roboto, Arial, sans-serif;
+    }
+
+    select:focus, input:focus {
+      outline: none;
+      border-color: #3ea6ff;
+      box-shadow: 0 0 0 2px rgba(62, 166, 255, 0.1);
+    }
+
+    #restore-all-btn,
+    #refresh-weekly-btn {
+      width: 100%;
+      padding: 10px;
+      background: #3ea6ff;
+      border: none;
+      color: white;
+      font-size: 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+      margin-top: 8px;
+      transition: all 0.2s;
+    }
+
+    #restore-all-btn:hover:not(:disabled),
+    #refresh-weekly-btn:hover:not(:disabled) {
+      background: #2d88cc;
+    }
+
+    #restore-all-btn:disabled,
+    #refresh-weekly-btn:disabled {
+      background: #555;
+      color: #999;
+      cursor: not-allowed;
+      opacity: 0.7;
+    }
+
+    .status {
+      padding: 8px 12px;
+      background: #282828;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-top: 12px;
+      text-align: center;
+      display: none;
+    }
+
+    .status.show {
+      display: block;
+    }
+
+    .status.success {
+      color: #4ae54a;
+      border: 1px solid #3d7d3d;
+    }
+
+    .status.info {
+      color: #aaa;
+      border: 1px solid #333;
+    }
+
+    .info-text {
+      font-size: 12px;
+      color: #888;
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    .divider {
+      height: 1px;
+      background: #333;
+      margin: 8px 0;
+    }
+
+    .better-feed-hidden-list {
+      max-height: 250px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+
+    .better-feed-hidden-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: #282828;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      color: #aaa;
+      font-size: 13px;
+      gap: 8px;
+    }
+
+    .better-feed-hidden-item-content {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .better-feed-hidden-item-badge {
+      background: #3ea6ff;
+      color: white;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      white-space: nowrap;
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+
+    .better-feed-hidden-item-badge.channel {
+      background: #ff6b6b;
+    }
+
+    .better-feed-hidden-item-text {
+      font-size: 12px;
+      color: #ccc;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .better-feed-restore-btn {
+      background: transparent;
+      border: 1px solid #444;
+      color: #aaa;
+      padding: 4px 8px;
+      font-size: 11px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+
+    .better-feed-restore-btn:hover {
+      background: #3ea6ff;
+      border-color: #3ea6ff;
+      color: white;
+    }
+
+    #restore-all-btn {
+      width: 100%;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2>BetterFeed</h2>
+  </div>
+
+  <div class="menu">
+    <button class="menu-item" id="settings-menu-btn">
+      <span class="menu-item-icon">⚙️</span>
+      <span>Settings</span>
+    </button>
+    <button class="menu-item" id="hidden-menu-btn">
+      <span class="menu-item-icon">👁️</span>
+      <span>Hidden Items</span>
+    </button>
+  </div>
+
+  <!-- Hidden Items Content -->
+  <div id="hidden-content" class="content">
+    <h3>Hidden Items</h3>
+    <div class="better-feed-hidden-list" id="hidden-list"></div>
+    <button id="restore-all-btn">Restore All</button>
+    <div id="status" class="status"></div>
+  </div>
+
+  <script src="shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

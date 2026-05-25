@@ -1,0 +1,27 @@
+# Chrome Web Store signing key — NEVER commit. Anyone with this file can
+# publish updates to the extension under the maintainer's identity.
+*.pem
+
+# Built/packed extension artifacts (re-derivable from source + .pem).
+*.crx
+*.zip
+
+# macOS Finder metadata.
+.DS_Store
+
+# Editor / IDE state.
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code local config + permission cache.
+.claude/
+
+# Logs and ad-hoc debug dumps.
+*.log
+
+# Local environment overrides (none today, but reserve the slot).
+.env
+.env.local
