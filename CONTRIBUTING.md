@@ -43,9 +43,12 @@ The **Settings → Debug** page is the maintainer's toolkit:
 - **Daily state readout.** Shows the day key, videos watched, time
   watched, and current grace. Auto-refreshes on storage changes.
 - **Manual refresh.** Forces the next page load to scrape a fresh grid.
-- **Force-add video.** Paste an ID / `youtu.be` / watch URL / shorts URL;
-  the extension prepends a stub to the weekly grid and the content script
-  fills in metadata via oEmbed on the next render.
+- **Force-add video.** Paste an 11-char video ID or any of: `youtu.be/ID`,
+  `youtube.com/watch?v=ID`, `youtube.com/shorts/ID`, `youtube.com/embed/ID`.
+  The extension prepends a stub to the weekly grid and `rebuildVideoMetadataIfNeeded()`
+  fills in title/channel (oEmbed), view count + duration + publish date +
+  members-only (watch page), and the channel avatar (channel page) on the
+  next render.
 - **Welcome page.** Reopens `welcome.html` (the first-install screen).
 - **Fake current time.** Sets a global offset that `getNow()` applies to
   every timestamp. Use this to test weekly/multi/daily refresh flows
@@ -181,7 +184,8 @@ guard in case anyone ever does generate one locally.
 2. Zip the extension:
 
    ```sh
-   zip -r betterfeed.zip . -x "*.pem" "*.git*" "*.DS_Store" "*.zip" "*.crx" "*.md" "CONTRIBUTING*"
+   zip -r betterfeed.zip . \
+     -x "*.pem" "*.git*" ".claude/*" "*.DS_Store" "*.zip" "*.crx" "*.md" "*.code-workspace"
    ```
 
 3. Upload `betterfeed.zip` to the Chrome Web Store developer dashboard.

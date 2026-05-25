@@ -39,23 +39,29 @@ explains the implementation.
                                                    (no settings yet)
 ```
 
-The redirect rule is the **only** thing that runs before the page parses. Every
-visit to `youtube.com/` becomes a visit to `youtube.com/feed/library#better-feed-*`,
-which is just a normal YouTube page with a hash. `early.js` notices the hash and
-sets `.better-feed-marker-mode` on `<html>`; `preload.css` then hides every native
-child of `ytd-browse` so the library content can't flash through. By the time
-content.js loads, the page is a blank canvas onto which the weekly grid is
-drawn.
+The redirect rule fires at the network layer, before the request ever
+reaches a tab. When it's active, every visit to `youtube.com/` becomes a
+visit to `youtube.com/feed/library#better-feed-*`, which is just a normal
+YouTube page with a hash. Then at `document_start` — before any DOM is
+parsed — `early.js` notices the hash and sets `.better-feed-marker-mode`
+on `<html>`; `preload.css` then hides every native child of `ytd-browse`
+(except our `#better-feed-home`) so the library content can't flash
+through. By the time content.js loads, the page is a blank canvas onto
+which the weekly grid is drawn.
 
-The redirect rule turns off when:
+The redirect rule turns off when the extension is disabled
+(`settings.enabled = false`). In Watch mode it also turns off when
+`settings.weeklyHomeEnabled` is off, `settings.redirectHomeEnabled` is
+off, or a refresh is due (we *want* to land on the real home so we can
+scrape it).
 
-- The extension is disabled (`settings.enabled = false`).
-- The user is in Work/Listen mode (those modes don't replace the home page).
-- A refresh is due (we *want* to land on the real home so we can scrape it).
+In Work / Listen mode the rule stays on and redirects to a different
+marker hash (`#better-feed-work` / `#better-feed-listen`); content.js
+renders the Work placeholder on that page instead of the weekly grid.
 
-That last point is why the rule is re-evaluated on every settings / mode /
-video-list / fake-time change, plus once every 5 minutes via a `chrome.alarms`
-heartbeat.
+The rule is re-evaluated on every settings / mode / refresh-after /
+video-list / fake-time storage change, plus once every 5 minutes via a
+`chrome.alarms` heartbeat.
 
 ---
 
@@ -78,20 +84,30 @@ Manifest V3. Lists:
 
 ### `background.js` — service worker
 
-Idle until something wakes it. On wake-up:
+Idle until something wakes it. Lifecycle and message handlers:
 
-1. `loadFakeNowOffset()` so `getNow()` returns the right value.
-2. `updateRedirectRule()` — read `settings`, `mode`, `refreshAfter`,
-   `hasVideos`, decide whether the redirect rule should be installed, then
-   `declarativeNetRequest.updateDynamicRules`.
-3. On `onInstalled`: clear mode (so the user picks again), hydrate from sync,
-   open the welcome tab if `reason === "install"`.
-4. On `onStartup`: same minus the welcome tab.
-5. Every 5 minutes (`chrome.alarms`): re-run `updateRedirectRule()`.
-6. On `chrome.runtime.onMessage` `"better-feed-prepare-scrape"`: temporarily
-   remove the redirect rule so content.js can navigate the tab to the real
-   `youtube.com/` and scrape. The rule is reinstalled by the next
-   settings/mode change once the scrape finishes.
+1. `updateRedirectRule()` reads `settings`, `mode`, `refreshAfter`,
+   `hasVideos`, decides whether the redirect rule should be installed, then
+   calls `declarativeNetRequest.updateDynamicRules`. It calls
+   `loadFakeNowOffset()` first so `getNow()` returns the right value.
+2. On `onInstalled` with `reason === "install"`: clear mode (so the user
+   picks again), migrate legacy storage keys, hydrate from sync, install
+   the redirect rule, open the welcome tab. For other install reasons
+   (update / reload from disk) the mode is preserved.
+3. On `onStartup`: clear mode, migrate legacy keys, hydrate from sync,
+   install the redirect rule.
+4. On `chrome.storage.onChanged` (local): re-run `updateRedirectRule()`
+   when settings, `refreshAfter`, videos, mode, or fake-time change. On
+   sync changes, route through `applySyncChangeToLocal()`.
+5. Every 5 minutes (`chrome.alarms` named `better-feed-refresh-check`):
+   re-run `updateRedirectRule()`.
+6. On `chrome.runtime.onMessage` of type `"better-feed-prepare-scrape"`:
+   temporarily remove the redirect rule so content.js can navigate the tab
+   to the real `youtube.com/` and scrape. The rule is reinstalled when
+   content.js writes the freshly scraped grid back to
+   `STORAGE_VIDEOS_KEY`, which fires the storage listener above.
+7. On `chrome.tabs.onRemoved` / `onUpdated`: if no YouTube tabs remain,
+   clear the mode so the next visit re-prompts the picker.
 
 The service worker holds no in-memory state across wake-ups — everything
 re-reads from `chrome.storage`.
@@ -102,11 +118,18 @@ Both load at `document_start`. The JS reads `location.hash` (set by the
 redirect rule) and `localStorage.betterFeedMode` (mirrored by `shared.js`) and
 applies a small set of `<html>` classes:
 
-- `better-feed-marker-mode` on every marker URL.
-- `better-feed-pre-ready` on every YouTube page until `content.js` says it's
-  done initializing (fades in the app shell over 220 ms).
-- `better-feed-work-mode` when entering Work mode (so the sidebar / home grid
-  / etc. can be hidden before YouTube tries to render them).
+- `better-feed-marker-mode` and `better-feed-pre-ready` on marker URLs
+  only — those whose hash is one of `#better-feed`, `#better-feed-watch`,
+  `#better-feed-work`, or `#better-feed-listen`.
+  `better-feed-pre-ready` keeps the app shell invisible until
+  `content.js` calls `markModeReady()`, which fades it in over 220ms.
+- `better-feed-work-mode` if the resolved mode is Work, or
+  `better-feed-watch-mode` if Watch, on every YouTube page. Listen mode
+  gets no class from early.js; once content.js loads,
+  `applyMarkerModeClass()` adds `better-feed-work-mode` to `<html>` (it
+  treats Listen and Work as equivalent via `isWorkLikeMode`). This lets
+  preload.css hide the sidebar / home grid / etc. before YouTube paints
+  them, including on non-marker pages like `/watch`.
 
 The CSS rules in `preload.css` are intentionally `!important` and use
 `html.<class>` ancestor selectors — they have to outrank YouTube's own
@@ -159,18 +182,31 @@ The behavior file. ~6700 lines, organized into the labeled sections you'll
 see if you grep for `/* ---------- ... ---------- */`. The top-of-file
 header lists every section and what it owns.
 
-The single entry point is `update()` (around the **MAIN** section). On any
-mode change / storage change / SPA navigation / cold-start completion, all
-roads lead to `update()`, which:
+The single entry point is `update()`, defined near the bottom of the file
+just before the **INIT** section. The actual branching logic lives in
+`onHomePage()` / `onNonHomePage()`, both in the **MAIN** section.
+On any mode change / storage change / SPA navigation / cold-start
+completion, all roads lead to `update()`, which calls
+`applyMarkerModeClass()` and then dispatches to `onHomePage()` or
+`onNonHomePage()` based on `isHomePage()`.
 
-1. Checks for cold-start (a fresh install with no settings yet) and renders
-   the four-step welcome flow if so.
-2. Routes Work/Listen mode to `renderWorkPlaceholder()`.
-3. Routes Watch mode on `/` (or the marker URL) to the weekly home renderer
-   (`getOrCreateWeeklyVideos` -> `renderCustomHome`).
-4. Falls through to `onNonHomePage()` for `/watch`, `/results`, channel
-   pages, etc. — these don't replace anything, they just apply feature
-   toggles (autoplay, comments, etc.).
+`onHomePage()` then branches:
+
+1. If cold-start is active, render the cold-start UI
+   (`renderColdStartSetup` / `…RefreshSchedule` / `…RefreshCustom` /
+   `…SyncFailed` / `…Loading`).
+2. If the mode is Work or Listen (`isWorkLikeMode`), render
+   `renderWorkPlaceholder()`.
+3. If the mode isn't Watch, strip our UI and return.
+4. If settings are disabled or `weeklyHomeEnabled` is off, strip our UI.
+5. If the daily limit is hit and no grace is active, render
+   `renderSeeYouTomorrow()`.
+6. Otherwise, `getOrCreateWeeklyVideos()` → `renderCustomHome()`.
+
+`onNonHomePage()` runs on `/watch`, `/results`, channel pages, etc. It
+doesn't replace anything — it just removes our injected style/grid (if
+present) and lets YouTube render. Feature toggles (autoplay, comments, etc.)
+are applied globally via `injectFeatureStyle()` regardless of page.
 
 ### `options.js` + `options.html`
 
@@ -210,19 +246,24 @@ refresh is due:
    almost always the case), we need to navigate to the *real* home page
    to scrape. The marker page can't scrape itself — the redirect rule
    would just keep bouncing it. So content.js:
-   - Stores `REFRESH_RETURN_FLAG = "1"` in `sessionStorage`.
-   - Sends `"better-feed-prepare-scrape"` to the service worker.
+   - Sets `sessionStorage[REFRESH_RETURN_FLAG] = "1"` (the key string is
+     `"better-feed-refresh-return"`).
+   - Sends `{type: "better-feed-prepare-scrape"}` to the service worker.
    - The service worker drops the redirect rule and replies `{ok: true}`.
    - content.js sets `window.location.href = "https://www.youtube.com/"`.
 
 3. **Scraping.** With the redirect rule gone, the navigation lands on the
-   real home page. The same content.js loads again, sees
-   `REFRESH_RETURN_FLAG = "1"` in sessionStorage, renders the "Refreshing..."
+   real home page. The same content.js loads again, sees the
+   `REFRESH_RETURN_FLAG` entry in sessionStorage, renders the "Refreshing..."
    loading screen, then:
    - `waitForVideoLinks(targetCount)` waits for YouTube's grid to populate.
-   - `scrapeRecommendations(candidateCount)` snapshots N candidate videos.
-   - `chooseWeeklyVideos()` picks the final set, filtering hidden /
-     mix-radio / sponsored / live items.
+   - `scrapeRecommendations(limit, { excludeLive })` snapshots up to
+     `limit` candidate videos, filtering out sponsored items, mix /
+     radio playlists, and live broadcasts (when `excludeLive` is set
+     from `settings.excludeLiveVideos`) at scrape time.
+   - `filterHiddenVideos()` strips anything the user has hidden.
+   - `chooseWeeklyVideos()` dedups, prefers entries with full metadata,
+     and slices to the target count.
 
 4. **Enrichment.** `enrichVideosFast()` fires per-video lookups against
    the watch page and channel page (with `FETCH_TIMEOUT_MS = 1800`) to fill
@@ -259,10 +300,16 @@ Three modes:
 Treated as equivalent by `isWorkLikeMode(mode)` in content.js. If you find
 a Watch-vs-Work check that should also apply to Listen, use that helper.
 
-`currentMode` lives in `chrome.storage.local.betterFeedSessionMode` and is
-mirrored to `localStorage` so `early.js` can read it synchronously. The
-URL hash is the source of truth on marker pages; localStorage is the
-fallback for non-marker pages (e.g. `/watch`).
+The canonical store for the active mode is
+`chrome.storage.local.betterFeedSessionMode`, read via `getCurrentMode()`.
+Two mirrors of it exist so early code can resolve the mode synchronously:
+`localStorage.betterFeedMode` (written by `syncModeToLocalStorage` on
+every `setCurrentMode` / `clearCurrentMode`) and the marker-page URL
+hash (set by the dNR redirect rule). `early.js` reads the URL hash first
+on marker pages; on non-marker pages (e.g. `/watch`) it falls back to
+`localStorage`. Once `content.js` loads, `loadCurrentMode()` re-reads
+from `chrome.storage.local` so the in-memory `currentMode` matches the
+canonical store.
 
 When the user opens YouTube fresh (typed URL, bookmark, external link)
 the mode picker re-prompts — see `isFreshTabNavigation()`. SPA navigations
@@ -279,24 +326,29 @@ Two flavors, both stored at `STORAGE_WORK_SESSION_KEY`:
 - **No-time:** `{ startedAt, noTime: true }`. No end. Watch lock is
   dynamic — see below.
 
-For no-time sessions:
+For no-time sessions, the lock window has three phases:
 
 ```
-0s                   15s (NO_TIME_GRACE_MS)            20m (NO_TIME_LOCK_MS)
+session start         + NO_TIME_GRACE_MS (15s)        + NO_TIME_LOCK_MS (20m)
 ├──── grace window ──┼──────── lock window ────────────┼───── no lock ─────────>
    bail freely          unlock code required               bail freely (but
                                                             session is still
                                                             running)
 ```
 
+`lockStartsAt()` returns `startedAt + NO_TIME_GRACE_MS`; `lockEndsAt()`
+returns `lockStartsAt() + NO_TIME_LOCK_MS`. So the lock window is 20
+minutes long, beginning 15 seconds after the session starts.
+
 When the lock window is active, choosing Watch from the mode switcher
 opens the unlock challenge (`renderWorkUnlockModal`) — type a fresh 16–20
 digit code to release.
 
-A "no-grace" session (`noGrace: true`) skips the grace window entirely. Set
-when starting a session from the **clock popover** or the **session-ended
-popup** — the user is already mid-Work and re-committing, so there's no
-fat-finger window to protect.
+A "no-grace" session (`noGrace: true`) skips the grace window entirely
+(`lockStartsAt()` returns `startedAt` directly). Set when starting a
+session from the **clock popover** or the **session-ended popup** — the
+user is already mid-Work and re-committing, so there's no fat-finger
+window to protect.
 
 The transitions between grace / lock / no-lock are handled by
 `scheduleWorkSessionTransitionCheck()`, which sets a `setTimeout` for the
@@ -308,7 +360,7 @@ next transition boundary and rebuilds the masthead chip when it fires.
 
 Tracks two counters per "day key":
 
-- `videoIds` — set of videos started today.
+- `videoIds` — array of distinct video IDs started today.
 - `secondsWatched` — total watch seconds today.
 
 A "day" is delimited by the user's `refreshHour` setting. Before that hour,
@@ -323,35 +375,80 @@ videos per day" with a refresh hour of 5am resets at 5am, not midnight.
 | `time`  | `secondsWatched >= maxSecondsPerDay`                    |
 | `both`  | Either of the above (whichever hits first).             |
 
-When hit, content.js redirects the tab to the marker URL and renders the
-"see you tomorrow" takeover (`renderSeeYouTomorrow`). The user can dismiss
-with a grace (`onGraceChosen("minutes", seconds)` or `("finish")`).
-Graces are stored at `STORAGE_DAILY_GRACE_KEY` and time out via either
-`armGraceExpirationTimer` (minutes) or `maybeEnforceGraceOnNavigation`
-(finish — re-checked on every SPA navigate).
+The takeover (`renderSeeYouTomorrow`) is owned by `onHomePage` — it
+renders whenever the user lands on the Watch marker page with the limit
+hit and no grace. Two other code paths funnel into that takeover by
+navigating to the marker:
+
+- **During playback** (`tickWatchTracking`): when the projected
+  `secondsWatched` would hit the limit, the player is paused and
+  `showDailyLimitPopup()` opens with four buttons — "1 more minute"
+  (`onGraceChosen("minutes", 60)`), "5 more minutes"
+  (`onGraceChosen("minutes", 300)`), "Finish video"
+  (`onGraceChosen("finish")`), and "Exit video"
+  (calls `redirectToBlockedMarker()` directly).
+- **Arriving at `/watch`** (`maybeStartWatchTracking`): if the limit is
+  already hit and no grace is active — or starting a new video would
+  push `videoIds.length` past `maxVideosPerDay` — `redirectToBlockedMarker()`
+  navigates the tab to the Watch marker URL, where `onHomePage` then
+  renders the takeover.
+
+The user can dismiss with a grace via `onGraceChosen("minutes", seconds)`
+or `onGraceChosen("finish")`. Graces are stored at
+`STORAGE_DAILY_GRACE_KEY` and time out via either
+`armGraceExpirationTimer` (minutes — fires a `setTimeout` at the
+expiration boundary) or `maybeEnforceGraceOnNavigation` (finish — also
+catches expired minutes graces, re-checked on every SPA navigate). A
+"finish" grace is also auto-granted by `tickWatchTracking` when the
+video count limit is crossed mid-watch, so the user isn't pulled out of
+the video they're currently watching.
 
 ---
 
 ## Watch tracking and auto-watched marking
 
-Two parallel tickers, both keyed off the `<video>` element on watch pages:
+Two parallel tickers, both keyed off the `<video>` element on watch
+pages. They have different scopes — the daily-limit ticker runs for any
+video, the watched-marking ticker only for videos in the current week's
+grid:
 
-- **`tickWatchTracking()`** every 5 seconds. Accumulates real seconds the
-  user has been on this video (not in a paused state), persists them to
-  the daily state's `secondsWatched`, and flips the daily-limit takeover
-  on if the threshold crosses.
-- **`tickWatchedMarking()`** every 250ms. Writes per-video
-  `{position, duration}` to `STORAGE_PROGRESS_KEY` so the progress bar
-  renders the next time the grid loads. Within 20 seconds of the end the
-  video is added to the watched set (`modifyWatched`).
+- **`tickWatchTracking()`** every 1 second, started by `maybeStartWatchTracking()`
+  when the active mode is Watch and `settings.dailyLimitEnabled`. It
+  computes the per-tick delta from `videoEl.currentTime`, skips paused /
+  ended / not-yet-ready frames, and discards seek jumps (`delta > 2s` or
+  `delta <= 0`). Real watched seconds accumulate in
+  `watchTrackPendingSeconds` and are flushed to the daily state's
+  `secondsWatched` every `WATCH_FLUSH_INTERVAL_MS` (5s) — not on every
+  tick. After `VIDEO_COUNT_THRESHOLD_SEC` (5s) of playback, the video's
+  ID is appended to `state.videoIds`; if that push crosses
+  `maxVideosPerDay`, a `"finish"` grace is auto-granted for the current
+  video so the user isn't yanked out mid-watch. If the daily limit is
+  hit and no grace is active, the player is paused and the
+  see-you-tomorrow popup is shown.
+- **`tickWatchedMarking()`** every 2 seconds, started by
+  `maybeStartWatchedMarking()` *only* when the current `/watch` video is
+  in the stored weekly grid (search results, sidebar suggestions, etc.
+  are skipped). Writes per-video `{position, duration}` to
+  `STORAGE_PROGRESS_KEY`, skipping the position-0 write and any write
+  whose fraction is within `PROGRESS_WRITE_DELTA = 0.01` of the last
+  one. The video is added to the watched set (`modifyWatched`) when any
+  of these thresholds fire: `videoEl.ended`,
+  ≤ `WATCHED_MARK_REMAINING_THRESHOLD_SEC` (20s) remaining on a video
+  longer than 20s, or ≥ 90% played.
 
-Progress is flushed to sync on `pagehide` (`flushProgressToSync`) — only
-on exit signals, not every tick. The flush also prunes stale entries
-(videos no longer in the current week's grid) before writing.
+Progress is flushed to sync via `flushProgressToSync` on `pagehide` and
+on `stopWatchedMarking()` (when the watched ticker stops because the user
+navigated away or the video changed) — never on every tick. The flush
+also prunes stale entries (videos no longer in the current week's grid)
+before writing.
 
 ---
 
 ## Storage and sync model
+
+Two `chrome.storage` areas are in play: `local` (per-device, larger quota)
+and `sync` (cross-device, tight quotas). Every key listed below lives in
+`local`; the "Synced" subset is *also* mirrored to `sync` on write.
 
 ### Local-only (per-device)
 
@@ -374,10 +471,10 @@ it via YouTube's oEmbed endpoint when the popup or options page renders.
 | `SETTINGS_KEY`                   | Sanitized settings + `_updatedAt` for LWW.        |
 | `STORAGE_VIDEOS_KEY`             | Weekly grid (sync ships IDs only; local has full).|
 | `STORAGE_REFRESH_AFTER_KEY`      | Timestamp of the next due refresh.                |
-| `STORAGE_HIDDEN_VIDEOS_KEY`      | Set of hidden video IDs.                          |
-| `STORAGE_HIDDEN_CHANNELS_KEY`    | Set of hidden channel keys.                       |
-| `STORAGE_WATCHED_VIDEOS_KEY`     | Set of watched video IDs (this week).             |
-| `STORAGE_PROGRESS_KEY`           | Per-video position. Sync ships bare numbers.      |
+| `STORAGE_HIDDEN_VIDEOS_KEY`      | Array of hidden video IDs.                        |
+| `STORAGE_HIDDEN_CHANNELS_KEY`    | Array of hidden channel keys.                     |
+| `STORAGE_WATCHED_VIDEOS_KEY`     | Array of watched video IDs (this week).           |
+| `STORAGE_PROGRESS_KEY`           | `{ [videoId]: {position, duration} }` locally; sync ships only the position as a bare number per video. |
 
 Sync caps:
 
@@ -402,12 +499,19 @@ sync set by progressively removing lower-priority keys.
 
 ## Hidden items and oEmbed rebuild
 
-Hidden videos are stored as `{Set videoIds, Set channelKeys, metadata}`,
-where `metadata` is `{[id]: {title, channelName}}`. The metadata blob is
-local-only — when a fresh device hydrates, the popup/options page calls
-`backfillMissingHiddenVideoMetadata()`, which hits `youtube.com/oembed`
-to recover titles + channels. Same trick for the weekly grid in
-`rebuildVideoMetadataIfNeeded()` (content.js).
+On disk, hidden state lives in three keys: `STORAGE_HIDDEN_VIDEOS_KEY`
+and `STORAGE_HIDDEN_CHANNELS_KEY` (each an array of IDs / channel keys)
+and `STORAGE_HIDDEN_METADATA_KEY` — a single map keyed by both video IDs
+and channel keys. Video entries look like `{type: "video", title,
+channelName}`; channel entries look like `{type: "channel", channelName}`.
+`getHiddenItems()` / `getHiddenItemsWithMetadata()` return them in memory
+as `{videos: Set, channels: Set, metadata}` for ergonomic membership tests.
+
+The metadata blob is local-only — when a fresh device hydrates, the
+popup/options page calls `backfillMissingHiddenVideoMetadata()`, which
+hits `youtube.com/oembed` to recover titles + channels. The same trick
+fills in the weekly grid via `rebuildVideoMetadataIfNeeded()`
+(content.js).
 
 oEmbed concurrency is capped at 4 (`OEMBED_CONCURRENCY`) to stay
 neighborly with YouTube's edge.
@@ -419,13 +523,20 @@ neighborly with YouTube's edge.
 There are two CSS injection points:
 
 1. **`preload.css`** at `document_start`. Targets the native YouTube
-   shell — hides the home grid, the marker-page library content, the
-   Work-mode sidebar, the cold-start app shell. Uses `!important` and
-   `html.<class>` ancestor selectors to outrank YouTube's stylesheet.
+   shell — hides the home grid (always, unless
+   `better-feed-show-native-home` is set), the marker-page library
+   content, the Work-mode sidebar, and (via `better-feed-pre-ready`)
+   fades in the whole `ytd-app` once content.js has decided what to
+   render. Uses `!important` and `html.<class>` ancestor selectors to
+   outrank YouTube's stylesheet.
 
-2. **`injectFeatureStyle()`** in content.js. A second `<style>` block
-   that toggles every feature class (`better-feed-hide-shorts`,
-   `better-feed-hide-comments`, etc.) on `<body>` based on settings.
+2. **`injectFeatureStyle()`** in content.js. A second `<style>` block whose
+   rules are gated on feature classes (`better-feed-hide-shorts`,
+   `better-feed-hide-comments`, etc.). The classes themselves are
+   toggled on `<html>` (`document.documentElement`) by
+   `applyFeatureSettings()` whenever settings change. The constants are
+   named `BODY_CLASS_*` for historical reasons but attach to `<html>`,
+   matching the `html.<class>` selectors used throughout.
 
 The split lets `preload.css` ship before any DOM parses (anti-flash work)
 while keeping the feature-toggle CSS dynamic.
@@ -436,8 +547,10 @@ while keeping the feature-toggle CSS dynamic.
 
 When the extension is installed on a device that's never synced:
 
-1. `update()` notices `!hasStoredVideos && !hasStoredSettings` and enters
-   cold-start mode.
+1. The init IIFE in `content.js` calls `detectColdStart()`, which returns
+   true when *both* `SETTINGS_KEY` and `STORAGE_VIDEOS_KEY` are missing
+   from local storage. The refresh-return path is excluded so a mid-scrape
+   reload doesn't accidentally re-enter cold start.
 2. `renderColdStartSetup()` asks whether to wait for sync or start fresh.
 3. If "wait for sync," `COLD_START_TIMEOUT_MS = 5000` ms is the budget.
    If sync arrives, the weekly grid populates immediately. If it doesn't,
@@ -447,8 +560,11 @@ When the extension is installed on a device that's never synced:
 5. Once a schedule is chosen, settings save and the normal refresh
    pipeline takes over.
 
-All four states are tracked by `coldStartView` and re-entered through
-`update()` (so a settings reset wipes back to the cold-start setup).
+All four states are tracked by `coldStartView`. The storage listener
+calls `maybeReEnterColdStart()` whenever settings *or* videos are
+cleared in storage; that function only re-enters cold start if
+`detectColdStart()` still finds both missing, so a single-key clear
+(e.g., settings without videos) won't reset the UI on its own.
 
 ---
 
@@ -464,11 +580,15 @@ All four states are tracked by `coldStartView` and re-entered through
   player) all still work — we just hide the body content and inject our
   grid. Channel pages, watch pages, search, etc. are untouched.
 - **Sync ships IDs only for the weekly grid.** Cuts the per-grid sync
-  blob by ~80% and makes the 102 KB per-item sync quota much harder to hit.
+  blob by ~80% and keeps it under `chrome.storage.sync`'s 8 KB
+  per-item quota (with plenty of room under the 102 KB total quota).
   oEmbed fills in the metadata after the IDs land.
-- **`getNow()` everywhere.** Every timestamp comparison routes through it
-  so the Debug fake-time offset can rewind/forward the entire extension
-  with one storage write. Critical for testing weekly/multi/daily refresh
+- **`getNow()` everywhere refresh / session / lock / grace state is
+  evaluated.** Sync LWW timestamps (`_updatedAt`) and a few timer-wait
+  calculations deliberately use real `Date.now()`, but anything the user
+  can observe as time-dependent state routes through `getNow()` so the
+  Debug fake-time offset can rewind/forward the entire extension with
+  one storage write. Critical for testing weekly/multi/daily refresh
   flows without waiting a calendar day.
 - **Friction-by-typing for unlock codes.** No paste, no autofill, no copy
   from the displayed code. The point is to make the user pause — anything

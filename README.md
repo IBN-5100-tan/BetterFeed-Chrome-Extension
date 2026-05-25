@@ -3,46 +3,56 @@
 ## Control your content. Kill doomscrolling.
 
 BetterFeed is a Chrome extension that replaces YouTube's algorithmic, infinite
-homepage with a small, **static** weekly grid that only changes when you decide.
+homepage with a small, **static** custom home page that only refreshes when you decide.
 
 You see the same videos until your scheduled refresh, so that **you can discover new
 videos without all of the doomscrolling traps.**
 
----
+## AI Usage Disclaimer
+To be completely transparent: **all** of this code was written using Claude Code Opus 4.7. I am not a web developer or software engineer — I work as a digital verification engineer and I understand web development to a certain degree, but truthfully, not to this level — *and* I am also extremely skeptical of and have a lot of very strong opinions about AI.
 
-![Before and after: YouTube's default homepage vs. BetterFeed's static weekly grid](pictures/before-after.png)
+I am also, however, very bothered by the fact that we have been unwittingly manipulated by massive social media and entertainment conglomerates that make money off of us by using psychological tricks to suck us in to spending unhealthy amounts of *our* time on their platforms.
+
+I know that there is a big level of hypocrisy in criticizing big tech while also using their AI tools. I can confidently say that it does not feel good to use AI to create a program like this, where I haven't learned how to program using JavaScript or anything along the way. My hope is, at least, that this will be useful for those of us who want to be intentional in the way that we spend our time.
+
+This whole project is completely open-source and free under the GPLv3 license, and I would be very happy if others were to contribute and, hopefully, create something even better out of this.
+
+Below is the actual README, now that I have gotten my schpiel out of the way.
+
+---
+## BetterFeed Extension Screenshots
+
+![Before and after: YouTube's default homepage vs. BetterFeed's custom home page](pictures/before-after.png)
 
 ## Highlights
 
-- **Static weekly home.** Pick a day and time; until then the grid doesn't move.
-- **Three refresh cadences.** Weekly, multiple days per week, or daily.
-- **Distraction cleanup.** Hide Shorts, watch-page recommendations, end-screen cards, autoplay,
-  live chat, side panel, comments, notification bell, mix/radio playlists,
+- **Static home page -** Pick a day and time to refresh; until then the home page doesn't change.
+- **Three refresh cadences -** Weekly, multiple days per week, or daily.
+- **Distraction cleanup -** Hide Shorts, watch-page recommendations, end-screen cards, autoplay, live chat, side panel, comments, notification bell, mix/radio playlists,
   voice search, Create button, Explore/Trending, Mix Radio playlists, and more.
-- **Daily watch limit.** Cap by video count, watch-time, or both. Grace 
+- **Daily watch limit -** Cap by video count, watch-time, or both. Grace 
   ("5 more minutes" or "finish this video" for example) when you hit your set limit.
-- **Modes.** Switch between Watch (the weekly feed), Work (search-only,
-  no sidebar, channel-click confirmation), and Listen (coming soon; a music listening mode).
-- **Work session lock.** Optionally commit to a session length; bailing out
+- **Modes -** Switch between Watch (your custom home page with your set daily-limit), Work (distraction-free work mode), and Listen (coming soon; a music listening mode).
+- **Work session lock -** Optionally commit to a session length; bailing out
   requires typing an unlock code.
-- **Watching lock.** Once you've started watching for the day, the Refresh and Daily
-  Limit settings lock behind the same code-typing challenge so you can't
+- **Watching lock -** Once you've started watching for the day, the Refresh and Daily
+  Limit settings lock behind the same unlock-code challenge so you can't
   impulsively raise the limit mid-binge.
-- **Cross-device sync.** Settings, weekly grid, hidden items, watched videos,
-  and progress all roam via `chrome.storage.sync`.
-- **Free, open source, GPL-licensed.**
+- **Cross-device sync -** Settings, custom home page, hidden items, watched videos,
+  and video progress all sync.
+- **Free, open source, GPLv3-licensed.**
 
 ---
 
 ## Install
 
-### From source (development)
+### From source (beta development)
 
 1. Clone or download this repo.
 2. Open `chrome://extensions` in Chrome / Brave / Edge / any Chromium browser.
 3. Toggle **Developer mode** on (top right).
 4. Click **Load unpacked** and choose this folder.
-5. Open `youtube.com` — you should land on the weekly home grid (after the
+5. Open `youtube.com` — you should land on the custom home page (after the
    one-time mode picker and an initial recommendation scrape).
 
 ### From the Chrome Web Store
@@ -60,7 +70,7 @@ The first time you load YouTube, BetterFeed asks which mode to enter:
 
 | Mode    | What it does                                                         |
 |---------|----------------------------------------------------------------------|
-| Watch   | Static weekly home. The default; lets you watch videos.              |
+| Watch   | Static custom home page. The default; lets you watch videos.         |
 | Work    | Search-only. Hides every grid, sidebar entry, and recommendation.    |
 | Listen  | Coming soon. To have music recommendations so you can discover new music and no daily limit so that you can listen to music while you work. |
 
@@ -70,59 +80,60 @@ Switch modes anytime via the **mode switcher button** in the YouTube masthead ne
 
 Configured under **Settings → Refresh**:
 
-- **Weekly.** One day per week.
-- **Multiple days per week.** Pick any combination of days; refreshes at the same hour each day.
-- **Daily.** A new grid every day.
+- **Weekly.** Refreshes once a week.
+- **Multiple days per week.** Refreshes on any combination of days per week.
+- **Daily.** Refreshes once a day.
 
 On a refresh, the extension navigates the active YouTube tab to the vanilla
-home page in the background, scrapes a fresh set of recommendations, and
-returns to the custom URL (some version of: `youtube.com/feed/library#better-feed`) with the new grid stored. Until the next refresh, you will always be redirected to and stay on the custom URL, and NOT `youtube.com` so YouTube's algorithm doesn't get messed up.
+home page in the background, gets a fresh set of recommendations, and
+returns to the custom URL (`youtube.com/feed/library#better-feed-watch`) with the new home page stored. 
+Until the next refresh, you will always be redirected to and stay on the custom URL, and **NOT** `youtube.com` so YouTube's algorithm doesn't get messed up.
 
 ### Daily limit
 
 Configured under **Settings → Daily limit**. Three modes:
 
-- **Videos.** Cap by number of videos watched today.
-- **Time.** Cap by total watch time (hours + minutes).
-- **Both** (default). Whichever ceiling hits first ends the day.
+- **Videos.** Cap by number of videos watched.
+- **Time.** Cap by total watch time.
+- **Both** (default). Whichever limit hits first.
 
-When you hit the limit BetterFeed shows a "see you tomorrow" takeover.
-A popup offers two graces: **5 more minutes** or **finish this video**.
+When you hit the limit, BetterFeed shows a "see you tomorrow" takeover.
+A popup offers choices like **5 more minutes** or **finish this video** for example.
 
 ### Hidden items
 
-Click the x on a video card or the **Hide channel** menu item to suppress
-videos / channels from future grids. Restore them from the popup
-(toolbar icon) or **Settings → Hidden videos**.
+Click the three dots on a video card and choose **Hide video** or **Hide channel** to suppress
+videos / channels from future home pages. Restore them from the popup
+(BetterFeed's chrome extension icon) or **Settings → Hidden videos**.
 
 ### Work session lock
 
-Starting a Work session optionally commits you for a fixed duration
-(20 min minimum) or open-ended ("no time"). Until the lock window closes,
-bailing back to Watch mode requires typing a fresh 16–20 digit code shown
-on screen. There is no paste / copy / autofill — friction is the point.
+Entering **Work mode** automatically *locks* **Watch mode** for 20 minutes minimum,
+or for a length of time that you choose, so that you don't impulsively try to watch videos 
+while you are trying to get work done. Until the lock timer ends,
+you will be required to type in an **unlock code** if you want to enter **Watch mode** early. The friction is intentional to help keep you on track by making you stop and think for a moment.
 
 ### Watching lock
 
-Once you've watched even one second today, the **Refresh schedule** and
-**Daily limit** sections in Settings lock. Editing them re-opens the same
-code-typing modal. Same theme as the work-session lock — designed to
-prevent the "let me just bump the limit" loophole.
+Once you've started watching videos for the day, the **Refresh schedule** and
+**Daily limit** settings lock to keep you from impulsively changing and ignoring them. 
 
 ---
 
 ## Permissions
 
-| Permission                | Why                                                                   |
-|---------------------------|-----------------------------------------------------------------------|
-| `storage`                 | Persist settings, the weekly grid, hidden lists, watched videos.      |
-| `declarativeNetRequest`   | Redirect `youtube.com/` to the marker URL where the grid is rendered. |
-| `alarms`                  | A 5-minute timer that re-checks whether a refresh is now due.         |
-| `*://www.youtube.com/*`   | The only host the content scripts and redirect rule touch.            |
+| Permission                | Why                                                                        |
+|---------------------------|----------------------------------------------------------------------------|
+| `storage`                 | Persist settings, the custom home page, hidden items, watched videos.      |
+| `declarativeNetRequest`   | Redirect `youtube.com/` to the marker URL where the home page is rendered. |
+| `alarms`                  | A 5-minute timer that re-checks whether a refresh is now due.              |
+| `*://www.youtube.com/*`   | The only host the content scripts and redirect rule touch.                 |
 
-The extension does **not** make calls to any backend other than
-`youtube.com/oembed` (a public YouTube endpoint used to recover video
-titles + channel names from bare IDs after a reinstall).
+The extension only contacts `youtube.com` (and its CDN `i.ytimg.com`
+for thumbnail images) — `oembed` for titles and channel names, watch
+pages for view count / duration / publish date, and channel pages for
+the channel avatar. No third-party servers, no analytics, no telemetry.
+See [PRIVACY.md](PRIVACY.md) for the full data-flow breakdown.
 
 ---
 
@@ -130,16 +141,16 @@ titles + channel names from bare IDs after a reinstall).
 
 Two storage areas:
 
-- **`chrome.storage.local`** (per-device) — full state: settings, weekly
-  grid, hidden lists, watched videos, per-video playback progress,
-  daily-state counters, work session, mode, and the fake-time debug offset.
+- **`chrome.storage.local`** (per-device) — full state: settings, custom home page, 
+  hidden lists, watched videos, per-video playback progress,
+  daily-state counters, work session.
 - **`chrome.storage.sync`** (cross-device) — a slim subset: settings, the
-  weekly grid as ID-only, hidden lists, watched videos, and per-video
+  home page videos as ID-only, hidden lists, watched videos, and per-video
   positions. Other devices rebuild missing metadata via YouTube's oEmbed
   endpoint.
 
 When sync changes, [`applySyncChangeToLocal`](shared.js) reconciles the
-two using a "newer wins for settings / refresh-grid, set-union for hidden
+two using a "newer wins for settings and home page content, set-union for hidden
 and watched lists, max-position wins for progress" strategy.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data flow.
@@ -163,10 +174,9 @@ preload.css      preload.css can hide the native home / sidebar / app shell
 shared.js        Constants, settings schema, storage helpers, sync logic.
                  Loaded by every other script.
 
-content.js       The big one. Everything users see on a YouTube tab:
-                 the weekly grid, mode picker, daily limit, work sessions,
-                 channel-click confirmation. See its top-of-file header for
-                 the section index.
+content.js       Everything users see on a YouTube tab:
+                 the custom home page, mode picker, daily limit, work sessions, etc. 
+                 See its top-of-file header for the section index.
 
 options.html +   The full-tab options page (Refresh, Cleanup, Daily limit,
 options.js       Hidden, Advanced, Debug).
@@ -197,3 +207,7 @@ session state machines) live in [ARCHITECTURE.md](ARCHITECTURE.md).
 BetterFeed is licensed under the **GNU General Public License v3.0 or later**.
 See `LICENSE` for the full text. Anyone is free to use, modify, and
 redistribute it under the same terms.
+
+## Contact
+
+For any questions or inquiries, please feel free to email me at hououinkyo@proton.me.
