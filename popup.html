@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <style>
     body {
-      width: 320px;
+      width: 192px;
       background: #1f1f1f;
       color: #f1f1f1;
       font-family: Roboto, Arial, sans-serif;
@@ -36,6 +36,7 @@
       border: none;
       color: #f1f1f1;
       font-size: 14px;
+      line-height: 16px;
       border-radius: 6px;
       cursor: pointer;
       transition: all 0.2s;
@@ -50,9 +51,26 @@
     }
 
     .menu-item-icon {
-      font-size: 16px;
-      width: 20px;
-      text-align: center;
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      background-color: #f1f1f1;
+      -webkit-mask-repeat: no-repeat;
+      mask-repeat: no-repeat;
+      -webkit-mask-position: center;
+      mask-position: center;
+      -webkit-mask-size: contain;
+      mask-size: contain;
+    }
+
+    .menu-item-icon-settings {
+      -webkit-mask-image: url("pictures/settings-icon.png");
+      mask-image: url("pictures/settings-icon.png");
+    }
+
+    .menu-item-icon-hidden {
+      -webkit-mask-image: url("pictures/hidden-icon.png");
+      mask-image: url("pictures/hidden-icon.png");
     }
 
     .content {
@@ -271,11 +289,11 @@
 
   <div class="menu">
     <button class="menu-item" id="settings-menu-btn">
-      <span class="menu-item-icon">⚙️</span>
+      <span class="menu-item-icon menu-item-icon-settings" aria-hidden="true"></span>
       <span>Settings</span>
     </button>
     <button class="menu-item" id="hidden-menu-btn">
-      <span class="menu-item-icon">👁️</span>
+      <span class="menu-item-icon menu-item-icon-hidden" aria-hidden="true"></span>
       <span>Hidden Items</span>
     </button>
   </div>
