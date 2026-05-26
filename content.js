@@ -493,7 +493,7 @@ function injectStyle() {
       grid-template-columns: repeat(3, minmax(0, 1fr));
       column-gap: 16px;
       row-gap: 40px;
-      width: min(1232px, calc(100vw - 80px));
+      width: 90%;
       margin-left: auto;
       margin-right: auto;
       align-items: start;
@@ -733,12 +733,6 @@ function injectStyle() {
       outline: none;
     }
 
-    @media (max-width: 900px) {
-      #${CUSTOM_HOME_ID} .better-feed-grid {
-        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      }
-    }
-
     @media (max-width: 600px) {
       #${CUSTOM_HOME_ID} {
         padding: 80px 16px 80px 16px;
@@ -747,10 +741,6 @@ function injectStyle() {
       #${CUSTOM_HOME_ID} .better-feed-week-header {
         margin: 0 -16px 12px -16px;
         padding: 16px 16px;
-      }
-
-      #${CUSTOM_HOME_ID} .better-feed-grid {
-        grid-template-columns: 1fr;
       }
     }
   `;
