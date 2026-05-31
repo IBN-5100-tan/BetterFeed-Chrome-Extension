@@ -63,30 +63,8 @@ function buildHiddenItemRow({ type, id, badgeText, badgeClass, displayText }) {
   return item;
 }
 
-// Pull missing video metadata from YouTube's public oEmbed endpoint so that
-// after a reinstall (where sync only carried back the IDs) the popup can
-// display real titles + channel names instead of bare video IDs.
-const OEMBED_CONCURRENCY = 4;
-
-async function fetchVideoMetadataFromOEmbed(videoId) {
-  if (!videoId) return null;
-  try {
-    const target = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
-    const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(target)}&format=json`;
-    const resp = await fetch(url);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (!data || typeof data !== "object") return null;
-    if (!data.title && !data.author_name) return null;
-    return {
-      type: "video",
-      title: data.title || "",
-      channelName: data.author_name || ""
-    };
-  } catch (_) {
-    return null;
-  }
-}
+// fetchVideoMetadataFromOEmbed + OEMBED_CONCURRENCY live in shared.js so
+// the popup, options page, and content script all use the same fetcher.
 
 async function backfillMissingHiddenVideoMetadata() {
   const { videos, metadata } = await getHiddenItemsWithMetadata();
@@ -107,7 +85,7 @@ async function backfillMissingHiddenVideoMetadata() {
   await modifyHidden(state => {
     if (!state.metadata) state.metadata = {};
     for (const [id, m] of Object.entries(fetched)) {
-      if (!state.metadata[id]?.title) state.metadata[id] = m;
+      if (!state.metadata[id]?.title) state.metadata[id] = { type: "video", ...m };
     }
   });
   await loadHiddenItems();

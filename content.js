@@ -59,8 +59,6 @@ const SCRAPE_CANDIDATE_COUNT = 36;
 // watch-page recheck) doesn't shrink the visible grid below the target.
 const REFRESH_BACKFILL_BUFFER = 5;
 
-const STYLE_ID = "better-feed-style";
-const FEATURE_STYLE_ID = "better-feed-feature-style";
 const CUSTOM_HOME_ID = "better-feed-home";
 
 const BODY_CLASS_HIDE_SHORTS = "better-feed-hide-shorts";
@@ -172,1697 +170,14 @@ function ensureThemeObserver() {
   }
 }
 
+
 /* ---------- STYLE ---------- */
+// All home-grid styles and feature-toggle / overlay styles now live in
+// home.css and features.css respectively, loaded by the manifest. Toggle
+// classes are still set on <html> by applyFeatureSettings(); the rules
+// over there activate when the matching class is present and the matching
+// DOM element exists.
 
-function injectStyle() {
-  if (document.getElementById(STYLE_ID)) return;
-
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = `
-    :root {
-      --better-feed-text-primary: #f1f1f1;
-      --better-feed-text-secondary: #aaaaaa;
-      --better-feed-base-bg: #0f0f0f;
-      --better-feed-panel-bg: #0f0f0f;
-      --better-feed-additive-bg: #303030;
-      --better-feed-menu-bg: #282828;
-      --better-feed-hover-bg: rgba(255, 255, 255, 0.1);
-    }
-
-    html.better-feed-light-mode {
-      --better-feed-text-primary: #0f0f0f;
-      --better-feed-text-secondary: #606060;
-      --better-feed-base-bg: #ffffff;
-      --better-feed-panel-bg: #ffffff;
-      --better-feed-additive-bg: #f2f2f2;
-      --better-feed-menu-bg: #ffffff;
-      --better-feed-hover-bg: rgba(0, 0, 0, 0.06);
-    }
-
-    ytd-browse[page-subtype="home"] ytd-rich-grid-renderer {
-      display: none !important;
-    }
-
-    ytd-browse[page-subtype="home"] ytd-feed-filter-chip-bar-renderer,
-    ytd-browse[page-subtype="home"] #chips-wrapper,
-    ytd-browse[page-subtype="home"] #header.ytd-rich-grid-renderer {
-      display: none !important;
-    }
-
-    /* NOTE: the marker-mode "hide everything in ytd-browse except our
-       container" rule lives in preload.css so it applies at document_start
-       — duplicating it here would just run later and shadow nothing. */
-
-    #${CUSTOM_HOME_ID} {
-      box-sizing: border-box;
-      width: 100%;
-      padding: 80px 24px 80px 24px;
-      font-family: Roboto, Arial, sans-serif;
-      color: var(--better-feed-text-primary);
-    }
-
-    html.better-feed-marker-mode ytd-masthead {
-      background: var(--better-feed-panel-bg) !important;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-cold-start {
-      padding: 120px 24px;
-      text-align: center;
-      font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
-      font-size: 18px;
-      color: var(--better-feed-text-secondary);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-see-you {
-      padding: 160px 24px;
-      text-align: center;
-      font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
-    }
-
-    /* With the sidebar hidden, YouTube's main content area still reserves
-       left-side space, which makes the See-you message look off-center.
-       Pin it to the viewport center instead. */
-    html.better-feed-see-you-tomorrow #${CUSTOM_HOME_ID} .better-feed-see-you {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      padding: 0;
-      width: max-content;
-      max-width: calc(100vw - 48px);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-see-you-title {
-      font-size: 32px;
-      font-weight: 700;
-      color: var(--better-feed-text-primary);
-      margin-bottom: 12px;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-see-you-sub {
-      font-size: 16px;
-      color: var(--better-feed-text-secondary);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup {
-      padding: 140px 24px;
-      text-align: center;
-      font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
-      max-width: 520px;
-      margin: 0 auto;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-title {
-      font-size: 28px;
-      font-weight: 700;
-      color: var(--better-feed-text-primary);
-      margin-bottom: 12px;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-sub {
-      font-size: 15px;
-      color: var(--better-feed-text-secondary);
-      margin-bottom: 28px;
-      line-height: 1.5;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-buttons {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      align-items: stretch;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-button {
-      padding: 12px 20px;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      font-family: inherit;
-      background: var(--better-feed-additive-bg);
-      color: var(--better-feed-text-primary);
-      transition: background 0.15s;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-button:hover {
-      background: var(--better-feed-hover-bg);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-button.better-feed-setup-primary {
-      background: #3ea6ff;
-      color: #fff;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-button.better-feed-setup-primary:hover {
-      background: #2d88cc;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-back {
-      position: absolute;
-      top: 24px;
-      left: 24px;
-      background: transparent;
-      border: none;
-      color: var(--better-feed-text-secondary);
-      font-family: inherit;
-      font-size: 14px;
-      cursor: pointer;
-      padding: 8px 12px;
-      border-radius: 8px;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: background 0.15s, color 0.15s;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-back:hover {
-      background: var(--better-feed-additive-bg);
-      color: var(--better-feed-text-primary);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-form {
-      padding: 80px 24px 60px;
-      max-width: 460px;
-      margin: 0 auto;
-      text-align: left;
-      font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
-      position: relative;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-form .better-feed-setup-title {
-      text-align: center;
-      margin-bottom: 28px;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-field {
-      margin-bottom: 22px;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-field-label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--better-feed-text-secondary);
-      margin-bottom: 8px;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-radio-group {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-radio {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 14px;
-      border-radius: 8px;
-      background: var(--better-feed-additive-bg);
-      cursor: pointer;
-      font-size: 14px;
-      color: var(--better-feed-text-primary);
-      transition: background 0.15s;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-radio:hover {
-      background: var(--better-feed-hover-bg);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-radio input[type="radio"] {
-      accent-color: #3ea6ff;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-form select,
-    #${CUSTOM_HOME_ID} .better-feed-setup-form input[type="number"] {
-      width: 100%;
-      height: 40px;
-      padding: 0 14px;
-      background: var(--better-feed-additive-bg);
-      border: 1px solid transparent;
-      color: var(--better-feed-text-primary);
-      border-radius: 8px;
-      font-size: 14px;
-      font-family: inherit;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-form select:focus,
-    #${CUSTOM_HOME_ID} .better-feed-setup-form input[type="number"]:focus {
-      outline: none;
-      border-color: #3ea6ff;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-time-row {
-      display: flex;
-      gap: 10px;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-time-row > * {
-      flex: 1;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-days-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 6px;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-day-check {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      background: var(--better-feed-additive-bg);
-      cursor: pointer;
-      font-size: 13px;
-      color: var(--better-feed-text-primary);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-day-check:hover {
-      background: var(--better-feed-hover-bg);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-day-check input[type="checkbox"] {
-      accent-color: #3ea6ff;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-setup-error {
-      color: #ff6b6b;
-      font-size: 13px;
-      margin-top: 4px;
-      min-height: 18px;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-week-header {
-      font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
-      font-size: 24px;
-      font-weight: 700;
-      line-height: 1.2;
-      color: var(--better-feed-text-primary);
-      background: var(--better-feed-panel-bg);
-      position: fixed;
-      top: 56px;
-      height: 56px;
-      z-index: 2019;
-      margin: 0;
-      /* No horizontal padding — alignWeekHeader pins the element's left/width
-         to the grid's bounding rect so the title sits flush with the first
-         card. The 600px media query below re-applies a small inset for narrow
-         screens where the grid spans the full container. */
-      padding: 0;
-      box-sizing: border-box;
-      display: flex;
-      align-items: center;
-      pointer-events: none;
-    }
-
-    /* Fixed 3-column layout, sized off the viewport rather than the
-       parent. Locks both the column count *and* the card size as the
-       sidebar opens/closes — sizing off the parent makes the 1fr tracks
-       grow when the drawer's gutter goes away. The min() cap lets the
-       grid still shrink gracefully on viewports narrower than ~1300px;
-       the media queries below take over below 900px. */
-    #${CUSTOM_HOME_ID} .better-feed-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      column-gap: 16px;
-      row-gap: 40px;
-      width: 90%;
-      margin-left: auto;
-      margin-right: auto;
-      align-items: start;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-card {
-      display: block;
-      text-decoration: none !important;
-      color: var(--better-feed-text-primary);
-      min-width: 0;
-      max-width: 100%;
-      overflow: visible;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-card:visited,
-    #${CUSTOM_HOME_ID} .better-feed-card:hover,
-    #${CUSTOM_HOME_ID} .better-feed-card:active {
-      color: var(--better-feed-text-primary);
-      text-decoration: none !important;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-thumbnail-wrap {
-      position: relative;
-      width: 100%;
-      max-width: 100%;
-      aspect-ratio: 16 / 9;
-      overflow: hidden;
-      border-radius: 12px;
-      background: var(--better-feed-additive-bg);
-      display: block;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-thumbnail {
-      width: 100% !important;
-      height: 100% !important;
-      max-width: 100% !important;
-      max-height: 100% !important;
-      object-fit: cover !important;
-      display: block !important;
-      background: var(--better-feed-additive-bg);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-duration {
-      position: absolute;
-      right: 4px;
-      bottom: 4px;
-      padding: 3px 4px;
-      border-radius: 4px;
-      background: rgba(0, 0, 0, 0.85);
-      color: #fff;
-      font-size: 12px;
-      font-weight: 500;
-      line-height: 12px;
-      z-index: 2;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-watched .better-feed-thumbnail {
-      filter: grayscale(70%) brightness(0.55);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-watched .better-feed-title,
-    #${CUSTOM_HOME_ID} .better-feed-watched .better-feed-channel,
-    #${CUSTOM_HOME_ID} .better-feed-watched .better-feed-stats {
-      opacity: 0.65;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-watched-badge {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      color: #fff;
-      font-size: 16px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
-      pointer-events: none;
-      z-index: 3;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-members-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      padding: 2px 6px;
-      margin-right: 6px;
-      border-radius: 4px;
-      background: rgba(43, 166, 64, 0.15);
-      color: #2ba640;
-      font-size: 11px;
-      font-weight: 600;
-      line-height: 1.1;
-      white-space: nowrap;
-      vertical-align: middle;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-progress-bar {
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      height: 4px;
-      background: rgba(255, 255, 255, 0.3);
-      z-index: 2;
-      pointer-events: none;
-    }
-    #${CUSTOM_HOME_ID} .better-feed-progress-bar-fill {
-      height: 100%;
-      background: #ff0000;
-      width: 0%;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-meta {
-      display: grid;
-      grid-template-columns: 36px 1fr 24px;
-      column-gap: 12px;
-      margin-top: 12px;
-      overflow: visible;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-avatar {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      background: var(--better-feed-additive-bg);
-      overflow: hidden;
-      flex-shrink: 0;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-avatar img {
-      width: 100% !important;
-      height: 100% !important;
-      object-fit: cover !important;
-      display: block !important;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-text {
-      min-width: 0;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-title {
-      color: var(--better-feed-text-primary);
-      font-size: 16px;
-      font-weight: 500;
-      line-height: 22px;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      margin: 0 0 4px 0;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-channel,
-    #${CUSTOM_HOME_ID} .better-feed-stats {
-      color: var(--better-feed-text-secondary);
-      font-size: 14px;
-      font-weight: 400;
-      line-height: 20px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-menu-wrap {
-      position: relative;
-      width: 24px;
-      height: 24px;
-      overflow: visible;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-menu {
-      width: 24px;
-      height: 24px;
-      border: 0;
-      border-radius: 50%;
-      background: transparent;
-      color: var(--better-feed-text-primary);
-      font-family: Roboto, Arial, sans-serif;
-      font-size: 20px;
-      line-height: 20px;
-      text-align: center;
-      opacity: 0;
-      user-select: none;
-      cursor: pointer;
-      padding: 0;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-card:hover .better-feed-menu,
-    #${CUSTOM_HOME_ID} .better-feed-menu:focus,
-    #${CUSTOM_HOME_ID} .better-feed-menu-wrap.open .better-feed-menu {
-      opacity: 1;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-menu:hover {
-      background: var(--better-feed-hover-bg);
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-menu-popover {
-      position: absolute;
-      top: 28px;
-      right: 0;
-      z-index: 9999;
-      min-width: 168px;
-      padding: 8px 0;
-      border-radius: 12px;
-      background: var(--better-feed-menu-bg);
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
-      display: none;
-      overflow: hidden;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-menu-wrap.open .better-feed-menu-popover {
-      display: block;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-menu-item {
-      width: 100%;
-      border: 0;
-      background: transparent;
-      color: var(--better-feed-text-primary);
-      font-family: Roboto, Arial, sans-serif;
-      font-size: 14px;
-      font-weight: 400;
-      line-height: 20px;
-      text-align: left;
-      padding: 10px 16px;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-
-    #${CUSTOM_HOME_ID} .better-feed-menu-item:hover,
-    #${CUSTOM_HOME_ID} .better-feed-menu-item:focus {
-      background: var(--better-feed-hover-bg);
-      outline: none;
-    }
-
-    @media (max-width: 600px) {
-      #${CUSTOM_HOME_ID} {
-        padding: 80px 16px 80px 16px;
-      }
-
-      #${CUSTOM_HOME_ID} .better-feed-week-header {
-        margin: 0 -16px 12px -16px;
-        padding: 16px 16px;
-      }
-    }
-  `;
-
-  document.head.appendChild(style);
-}
-
-function removeStyle() {
-  const style = document.getElementById(STYLE_ID);
-  if (style) style.remove();
-}
-
-function injectFeatureStyle() {
-  if (document.getElementById(FEATURE_STYLE_ID)) return;
-
-  const style = document.createElement("style");
-  style.id = FEATURE_STYLE_ID;
-  style.textContent = `
-    html.${BODY_CLASS_HIDE_SHORTS} ytd-rich-shelf-renderer[is-shorts],
-    html.${BODY_CLASS_HIDE_SHORTS} ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
-    html.${BODY_CLASS_HIDE_SHORTS} ytd-reel-shelf-renderer,
-    html.${BODY_CLASS_HIDE_SHORTS} ytd-shelf-renderer:has(ytd-reel-item-renderer),
-    html.${BODY_CLASS_HIDE_SHORTS} ytd-guide-entry-renderer:has(a[title="Shorts"]),
-    html.${BODY_CLASS_HIDE_SHORTS} ytd-mini-guide-entry-renderer[aria-label="Shorts"],
-    html.${BODY_CLASS_HIDE_SHORTS} ytd-video-renderer:has(a[href*="/shorts/"]),
-    html.${BODY_CLASS_HIDE_SHORTS} ytd-grid-video-renderer:has(a[href*="/shorts/"]),
-    html.${BODY_CLASS_HIDE_SHORTS} ytd-rich-item-renderer:has(a[href*="/shorts/"]),
-    html.${BODY_CLASS_HIDE_SHORTS} ytd-compact-video-renderer:has(a[href*="/shorts/"]),
-    html.${BODY_CLASS_HIDE_SHORTS} yt-lockup-view-model:has(a[href*="/shorts/"]),
-    html.${BODY_CLASS_HIDE_SHORTS} ytm-shorts-lockup-view-model,
-    html.${BODY_CLASS_HIDE_SHORTS} ytm-shorts-lockup-view-model-v2,
-    html.${BODY_CLASS_HIDE_SHORTS} grid-shelf-view-model:has(ytm-shorts-lockup-view-model) {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_WATCH_RECS} #related,
-    html.${BODY_CLASS_HIDE_WATCH_RECS} ytd-watch-next-secondary-results-renderer {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_WATCH_RECS} ytd-watch-flexy:not(:has(ytd-live-chat-frame)) #secondary.ytd-watch-flexy,
-    html.${BODY_CLASS_HIDE_WATCH_RECS}.${BODY_CLASS_HIDE_LIVE_CHAT} #secondary.ytd-watch-flexy {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_WATCH_RECS} ytd-watch-flexy:not([theater]):not(:has(ytd-live-chat-frame)) #columns.ytd-watch-flexy,
-    html.${BODY_CLASS_HIDE_WATCH_RECS}.${BODY_CLASS_HIDE_LIVE_CHAT} ytd-watch-flexy:not([theater]) #columns.ytd-watch-flexy,
-    html.${BODY_CLASS_HIDE_WATCH_RECS}.${BODY_CLASS_HIDE_WATCH_SIDE_PANEL} ytd-watch-flexy:not([theater]) #columns.ytd-watch-flexy {
-      justify-content: center !important;
-    }
-
-    html.${BODY_CLASS_HIDE_WATCH_RECS} ytd-watch-flexy:not([theater]):not(:has(ytd-live-chat-frame)) #primary.ytd-watch-flexy,
-    html.${BODY_CLASS_HIDE_WATCH_RECS}.${BODY_CLASS_HIDE_LIVE_CHAT} ytd-watch-flexy:not([theater]) #primary.ytd-watch-flexy,
-    html.${BODY_CLASS_HIDE_WATCH_RECS}.${BODY_CLASS_HIDE_WATCH_SIDE_PANEL} ytd-watch-flexy:not([theater]) #primary.ytd-watch-flexy {
-      margin-left: auto !important;
-      margin-right: auto !important;
-    }
-
-    html.${BODY_CLASS_DISABLE_AUTOPLAY} .ytp-autonav-endscreen-upnext-container,
-    html.${BODY_CLASS_DISABLE_AUTOPLAY} .ytp-autonav-endscreen,
-    html.${BODY_CLASS_DISABLE_AUTOPLAY} .ytp-upnext {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_END_SCREEN_CARDS} .ytp-endscreen-content,
-    html.${BODY_CLASS_HIDE_END_SCREEN_CARDS} .ytp-ce-element,
-    html.${BODY_CLASS_HIDE_END_SCREEN_CARDS} .ytp-ce-covering-overlay,
-    html.${BODY_CLASS_HIDE_END_SCREEN_CARDS} .ytp-fullscreen-grid,
-    html.${BODY_CLASS_HIDE_END_SCREEN_CARDS} .ytp-modern-videowall-still,
-    html.${BODY_CLASS_HIDE_END_SCREEN_CARDS} .ytp-suggestion-set {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_LIVE_CHAT} ytd-live-chat-frame,
-    html.${BODY_CLASS_HIDE_LIVE_CHAT} ytd-live-chat-frame#chat,
-    html.${BODY_CLASS_HIDE_LIVE_CHAT} #chat-container.ytd-watch-flexy {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_WATCH_SIDE_PANEL} ytd-watch-flexy #fixed-side-menu,
-    html.${BODY_CLASS_HIDE_WATCH_SIDE_PANEL} ytd-watch-flexy yt-side-rail-view-model,
-    html.${BODY_CLASS_HIDE_WATCH_SIDE_PANEL} ytd-watch-flexy #panels,
-    html.${BODY_CLASS_HIDE_WATCH_SIDE_PANEL} ytd-watch-flexy #panels-full-bleed-container,
-    html.${BODY_CLASS_HIDE_WATCH_SIDE_PANEL} ytd-watch-flexy ytd-engagement-panel-section-list-renderer {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_WATCH_SIDE_PANEL} ytd-watch-flexy #columns.ytd-watch-flexy::after {
-      display: none !important;
-      content: none !important;
-      width: 0 !important;
-    }
-
-    html.${BODY_CLASS_HIDE_COMMENTS} ytd-comments,
-    html.${BODY_CLASS_HIDE_COMMENTS} ytd-comments#comments,
-    html.${BODY_CLASS_HIDE_COMMENTS} #comments.ytd-watch-flexy {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_NOTIFICATION_BELL} ytd-notification-topbar-button-renderer {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_EXPLORE_TRENDING} ytd-guide-section-renderer:has(a[title="Trending"]),
-    html.${BODY_CLASS_HIDE_EXPLORE_TRENDING} ytd-guide-section-renderer:has(a[title="Movies & TV"]),
-    html.${BODY_CLASS_HIDE_EXPLORE_TRENDING} ytd-guide-section-renderer:has(a[title="Shopping"]),
-    html.${BODY_CLASS_HIDE_EXPLORE_TRENDING} ytd-guide-section-renderer:has(a[title="Gaming"]),
-    html.${BODY_CLASS_HIDE_EXPLORE_TRENDING} ytd-guide-entry-renderer:has(a[title="Trending"]),
-    html.${BODY_CLASS_HIDE_EXPLORE_TRENDING} ytd-mini-guide-entry-renderer[aria-label="Trending"] {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_MORE_FROM_YOUTUBE} ytd-guide-section-renderer:has(a[title="YouTube Premium"]),
-    html.${BODY_CLASS_HIDE_MORE_FROM_YOUTUBE} ytd-guide-section-renderer:has(a[title="YouTube TV"]),
-    html.${BODY_CLASS_HIDE_MORE_FROM_YOUTUBE} ytd-guide-section-renderer:has(a[title="YouTube Music"]),
-    html.${BODY_CLASS_HIDE_MORE_FROM_YOUTUBE} ytd-guide-section-renderer:has(a[title="YouTube Kids"]) {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_MIX_RADIO_PLAYLISTS} ytd-radio-renderer,
-    html.${BODY_CLASS_HIDE_MIX_RADIO_PLAYLISTS} ytd-compact-radio-renderer,
-    html.${BODY_CLASS_HIDE_MIX_RADIO_PLAYLISTS} ytd-rich-item-renderer:has(a[href*="list=RD"]),
-    html.${BODY_CLASS_HIDE_MIX_RADIO_PLAYLISTS} yt-lockup-view-model:has(a[href*="list=RD"]) {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_VOICE_SEARCH} #voice-search-button,
-    html.${BODY_CLASS_HIDE_VOICE_SEARCH} ytd-masthead #voice-search-button {
-      display: none !important;
-    }
-
-    html.${BODY_CLASS_HIDE_CREATE_BUTTON} ytd-masthead ytd-button-renderer:has(button[aria-label="Create"]),
-    html.${BODY_CLASS_HIDE_CREATE_BUTTON} ytd-masthead ytd-topbar-menu-button-renderer:has(button[aria-label="Create"]),
-    html.${BODY_CLASS_HIDE_CREATE_BUTTON} ytd-masthead button[aria-label="Create"] {
-      display: none !important;
-    }
-
-    #better-feed-daily-popup {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.75);
-      z-index: 999999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
-    }
-
-    #better-feed-daily-popup .better-feed-daily-popup-card {
-      background: #212121;
-      color: #f1f1f1;
-      border-radius: 12px;
-      padding: 32px;
-      max-width: 420px;
-      width: calc(100% - 48px);
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-      text-align: center;
-    }
-
-    html.better-feed-light-mode #better-feed-daily-popup .better-feed-daily-popup-card {
-      background: #ffffff;
-      color: #0f0f0f;
-    }
-
-    #better-feed-daily-popup h2 {
-      margin: 0 0 8px 0;
-      font-size: 22px;
-      font-weight: 700;
-    }
-
-    #better-feed-daily-popup p {
-      margin: 0 0 24px 0;
-      font-size: 14px;
-      opacity: 0.8;
-    }
-
-    #better-feed-daily-popup .better-feed-daily-popup-buttons {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    #better-feed-daily-popup button {
-      padding: 12px 20px;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      font-family: inherit;
-      background: #3ea6ff;
-      color: #fff;
-      transition: background 0.15s;
-    }
-
-    #better-feed-daily-popup button:hover {
-      background: #2d88cc;
-    }
-
-    #better-feed-daily-popup button.secondary {
-      background: #383838;
-      color: #f1f1f1;
-    }
-
-    html.better-feed-light-mode #better-feed-daily-popup button.secondary {
-      background: #e5e5e5;
-      color: #0f0f0f;
-    }
-
-    #better-feed-daily-popup button.secondary:hover {
-      background: #4a4a4a;
-    }
-
-    html.better-feed-light-mode #better-feed-daily-popup button.secondary:hover {
-      background: #d4d4d4;
-    }
-
-    #better-feed-channel-confirm {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.75);
-      z-index: 999999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
-    }
-
-    #better-feed-channel-confirm .better-feed-channel-confirm-card {
-      background: #212121;
-      color: #f1f1f1;
-      border-radius: 12px;
-      padding: 32px;
-      max-width: 460px;
-      width: calc(100% - 48px);
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-      text-align: center;
-    }
-
-    html.better-feed-light-mode #better-feed-channel-confirm .better-feed-channel-confirm-card {
-      background: #ffffff;
-      color: #0f0f0f;
-    }
-
-    #better-feed-channel-confirm h2 {
-      margin: 0 0 12px 0;
-      font-size: 20px;
-      font-weight: 700;
-      line-height: 1.3;
-    }
-
-    #better-feed-channel-confirm p {
-      margin: 0 0 24px 0;
-      font-size: 14px;
-      opacity: 0.8;
-      line-height: 1.5;
-    }
-
-    #better-feed-channel-confirm .better-feed-channel-confirm-buttons {
-      display: flex;
-      gap: 10px;
-    }
-
-    #better-feed-channel-confirm button {
-      flex: 1;
-      padding: 12px 20px;
-      border-radius: 8px;
-      border: none;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      font-family: inherit;
-      transition: background 0.15s;
-    }
-
-    #better-feed-channel-confirm button.primary {
-      background: #3ea6ff;
-      color: #fff;
-    }
-
-    #better-feed-channel-confirm button.primary:hover {
-      background: #2d88cc;
-    }
-
-    #better-feed-channel-confirm button.secondary {
-      background: #383838;
-      color: #f1f1f1;
-    }
-
-    html.better-feed-light-mode #better-feed-channel-confirm button.secondary {
-      background: #e5e5e5;
-      color: #0f0f0f;
-    }
-
-    #better-feed-channel-confirm button.secondary:hover {
-      background: #4a4a4a;
-    }
-
-    html.better-feed-light-mode #better-feed-channel-confirm button.secondary:hover {
-      background: #d4d4d4;
-    }
-
-    #better-feed-mode-picker {
-      position: fixed;
-      inset: 0;
-      background: #0f0f0f;
-      z-index: 999998;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
-      opacity: 0;
-      transition: opacity 220ms ease-out;
-    }
-
-    #better-feed-mode-picker.better-feed-picker-visible {
-      opacity: 1;
-    }
-
-    #better-feed-mode-picker.better-feed-picker-closing {
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    html.better-feed-light-mode #better-feed-mode-picker {
-      background: #f9f9f9;
-    }
-
-    #better-feed-mode-picker .better-feed-mode-picker-inner {
-      max-width: 880px;
-      width: 100%;
-      text-align: center;
-    }
-
-    #better-feed-mode-picker .better-feed-mode-picker-title {
-      color: #f1f1f1;
-      font-size: 30px;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      margin: 0 0 8px 0;
-    }
-
-    #better-feed-mode-picker .better-feed-mode-picker-sub {
-      color: #aaa;
-      font-size: 15px;
-      margin: 0 0 36px 0;
-    }
-
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-picker-title { color: #0f0f0f; }
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-picker-sub { color: #606060; }
-
-    #better-feed-mode-picker .better-feed-mode-cards {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
-    }
-
-    @media (max-width: 760px) {
-      #better-feed-mode-picker .better-feed-mode-cards {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    #better-feed-mode-picker .better-feed-mode-card {
-      background: #1f1f1f;
-      border: 1px solid #2a2a2a;
-      border-radius: 14px;
-      padding: 28px 22px;
-      cursor: pointer;
-      transition: border-color 0.15s, background 0.15s, transform 0.05s;
-      color: #f1f1f1;
-      font-family: inherit;
-      text-align: left;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card {
-      background: #fff;
-      border-color: #e5e5e5;
-      color: #0f0f0f;
-    }
-
-    #better-feed-mode-picker .better-feed-mode-card:hover {
-      border-color: #3ea6ff;
-      background: #232323;
-    }
-
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card:hover {
-      background: #f8f8f8;
-    }
-
-    #better-feed-mode-picker .better-feed-mode-card:active {
-      transform: translateY(1px);
-    }
-
-    #better-feed-mode-picker .better-feed-mode-card-name {
-      font-size: 20px;
-      font-weight: 600;
-      letter-spacing: -0.005em;
-    }
-
-    #better-feed-mode-picker .better-feed-mode-card-desc {
-      font-size: 13px;
-      color: #aaa;
-      line-height: 1.5;
-    }
-
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card-desc { color: #606060; }
-
-    #better-feed-mode-picker .better-feed-mode-card-locked {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    #better-feed-mode-picker .better-feed-mode-card-locked:hover {
-      border-color: rgba(255, 255, 255, 0.12);
-      background: transparent;
-    }
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card-locked:hover {
-      background: transparent;
-    }
-
-    #better-feed-mode-picker .better-feed-custom-session-form {
-      display: flex;
-      gap: 12px;
-      align-items: flex-end;
-      justify-content: center;
-      margin-top: 16px;
-      padding-top: 16px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-      flex-wrap: wrap;
-    }
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-custom-session-form {
-      border-top-color: rgba(0, 0, 0, 0.08);
-    }
-    #better-feed-mode-picker .better-feed-custom-session-form label {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font-size: 12px;
-      color: #aaa;
-    }
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-custom-session-form label { color: #606060; }
-    #better-feed-mode-picker .better-feed-custom-session-form input {
-      width: 72px;
-      padding: 8px 10px;
-      background: rgba(255, 255, 255, 0.06);
-      color: #f1f1f1;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      border-radius: 8px;
-      font-size: 16px;
-      font-family: inherit;
-      text-align: center;
-    }
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-custom-session-form input {
-      background: #f5f5f5;
-      color: #0f0f0f;
-      border-color: rgba(0, 0, 0, 0.16);
-    }
-    #better-feed-mode-picker .better-feed-custom-session-start {
-      padding: 10px 18px;
-      background: #3ea6ff;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
-    }
-    #better-feed-mode-picker .better-feed-custom-session-start:hover {
-      background: #2d88cc;
-    }
-    #better-feed-mode-picker .better-feed-custom-session-min-note,
-    #better-feed-session-length-picker .better-feed-custom-session-min-note {
-      flex-basis: 100%;
-      text-align: center;
-      font-size: 12px;
-      color: #777;
-      margin-top: 4px;
-    }
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-custom-session-min-note,
-    html.better-feed-light-mode #better-feed-session-length-picker .better-feed-custom-session-min-note {
-      color: #888;
-    }
-
-    /* Back link in the full pickers — sits below the session-length cards
-       (and below the custom form when it's expanded), centered. */
-    #better-feed-mode-picker .better-feed-session-length-back,
-    #better-feed-session-length-picker .better-feed-session-length-back {
-      display: inline-block;
-      background: none;
-      border: none;
-      color: #aaa;
-      font-size: 14px;
-      font-family: inherit;
-      cursor: pointer;
-      padding: 8px 16px;
-      margin-top: 24px;
-    }
-
-    /* X close in the top-right of the mode picker. */
-    #better-feed-mode-picker .better-feed-mode-picker-close {
-      position: absolute;
-      top: 16px;
-      right: 20px;
-      background: none;
-      border: none;
-      color: #aaa;
-      font-size: 34px;
-      font-weight: 100;
-      font-family: inherit;
-      line-height: 1;
-      cursor: pointer;
-      padding: 4px 10px;
-    }
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-picker-close {
-      color: #606060;
-    }
-    #better-feed-mode-picker .better-feed-mode-picker-close:hover {
-      color: #f1f1f1;
-    }
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-picker-close:hover {
-      color: #0f0f0f;
-    }
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-session-length-back,
-    html.better-feed-light-mode #better-feed-session-length-picker .better-feed-session-length-back {
-      color: #606060;
-    }
-    #better-feed-mode-picker .better-feed-session-length-back:hover,
-    #better-feed-session-length-picker .better-feed-session-length-back:hover {
-      color: #f1f1f1;
-    }
-    html.better-feed-light-mode #better-feed-mode-picker .better-feed-session-length-back:hover,
-    html.better-feed-light-mode #better-feed-session-length-picker .better-feed-session-length-back:hover {
-      color: #0f0f0f;
-    }
-
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-session-length-back {
-      background: none;
-      border: none;
-      color: #aaa;
-      font-size: 11px;
-      font-family: inherit;
-      cursor: pointer;
-      padding: 2px 0;
-      margin: 0 0 6px 0;
-      align-self: flex-start;
-    }
-    html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-session-length-back {
-      color: #606060;
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-session-length-back:hover {
-      color: inherit;
-    }
-
-    /* Session-length picker: four equal-width cards in a single row, centered
-       and capped so they don't stretch into dead space. */
-    #better-feed-mode-picker .better-feed-session-length-cards,
-    #better-feed-session-length-picker .better-feed-session-length-cards {
-      grid-template-columns: repeat(4, 1fr);
-      max-width: 760px;
-      margin: 0 auto;
-      gap: 12px;
-    }
-    #better-feed-mode-picker .better-feed-session-length-cards .better-feed-mode-card,
-    #better-feed-session-length-picker .better-feed-session-length-cards .better-feed-mode-card {
-      padding: 20px 16px;
-      gap: 6px;
-      text-align: center;
-      align-items: center;
-      justify-content: center;
-    }
-    #better-feed-mode-picker .better-feed-session-length-cards .better-feed-mode-card-name,
-    #better-feed-session-length-picker .better-feed-session-length-cards .better-feed-mode-card-name {
-      font-size: 17px;
-    }
-    #better-feed-mode-picker .better-feed-session-length-cards .better-feed-mode-card-desc,
-    #better-feed-session-length-picker .better-feed-session-length-cards .better-feed-mode-card-desc {
-      font-size: 12px;
-      line-height: 1.4;
-    }
-    /* Wrap to 2x2 on narrower screens, then 1 col on very narrow. */
-    @media (max-width: 720px) {
-      #better-feed-mode-picker .better-feed-session-length-cards,
-      #better-feed-session-length-picker .better-feed-session-length-cards {
-        grid-template-columns: repeat(2, 1fr);
-        max-width: 460px;
-      }
-    }
-    @media (max-width: 420px) {
-      #better-feed-mode-picker .better-feed-session-length-cards,
-      #better-feed-session-length-picker .better-feed-session-length-cards {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    #better-feed-work-clock {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 32px;
-      height: 32px;
-      margin: 0 6px 0 0;
-      background: rgba(255, 255, 255, 0.08);
-      color: #f1f1f1;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 999px;
-      cursor: pointer;
-      padding: 0;
-    }
-    html.better-feed-light-mode #better-feed-work-clock {
-      background: rgba(0, 0, 0, 0.05);
-      color: #0f0f0f;
-      border-color: rgba(0, 0, 0, 0.12);
-    }
-    #better-feed-work-clock:hover {
-      background: rgba(255, 255, 255, 0.14);
-    }
-    html.better-feed-light-mode #better-feed-work-clock:hover {
-      background: rgba(0, 0, 0, 0.08);
-    }
-
-    #better-feed-work-clock-popover {
-      z-index: 999999;
-      padding: 10px 14px;
-      background: #212121;
-      color: #f1f1f1;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 500;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-      font-variant-numeric: tabular-nums;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      min-width: 180px;
-    }
-    html.better-feed-light-mode #better-feed-work-clock-popover {
-      background: #fff;
-      color: #0f0f0f;
-      border-color: rgba(0, 0, 0, 0.1);
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-    }
-    #better-feed-work-clock-popover .better-feed-work-clock-end-btn {
-      padding: 6px 10px;
-      background: rgba(255, 255, 255, 0.06);
-      color: inherit;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
-      font-family: inherit;
-      cursor: pointer;
-    }
-    html.better-feed-light-mode #better-feed-work-clock-popover .better-feed-work-clock-end-btn {
-      background: rgba(0, 0, 0, 0.04);
-      border-color: rgba(0, 0, 0, 0.12);
-    }
-    #better-feed-work-clock-popover .better-feed-work-clock-end-btn:hover {
-      background: rgba(255, 255, 255, 0.12);
-    }
-    html.better-feed-light-mode #better-feed-work-clock-popover .better-feed-work-clock-end-btn:hover {
-      background: rgba(0, 0, 0, 0.08);
-    }
-
-    /* Inline session-length picker inside the clock popover. */
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting {
-      min-width: 240px;
-      padding: 12px;
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-picker-title {
-      font-size: 13px;
-      font-weight: 600;
-      margin: 0 0 10px;
-      text-align: center;
-      color: inherit;
-      letter-spacing: 0;
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-cards {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card {
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-      padding: 8px 10px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 6px;
-      color: inherit;
-      font-family: inherit;
-      cursor: pointer;
-      text-align: center;
-      align-items: center;
-    }
-    html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card {
-      background: rgba(0, 0, 0, 0.03);
-      border-color: rgba(0, 0, 0, 0.1);
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card:hover {
-      border-color: #3ea6ff;
-      background: rgba(255, 255, 255, 0.08);
-    }
-    html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card:hover {
-      background: rgba(0, 0, 0, 0.06);
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card-name {
-      font-size: 13px;
-      font-weight: 500;
-    }
-    /* Hide the verbose descriptions in popover context — names alone are
-       enough at this scale. */
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card-desc {
-      display: none;
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form {
-      display: none;
-      flex-direction: column;
-      gap: 8px;
-      margin-top: 8px;
-      padding-top: 8px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form {
-      border-top-color: rgba(0, 0, 0, 0.08);
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form label {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      font-size: 11px;
-      color: #aaa;
-    }
-    html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form label {
-      color: #606060;
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form input {
-      width: 64px;
-      padding: 4px 8px;
-      background: rgba(255, 255, 255, 0.06);
-      color: inherit;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      border-radius: 4px;
-      font-size: 13px;
-      font-family: inherit;
-      text-align: center;
-    }
-    html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form input {
-      background: #f5f5f5;
-      border-color: rgba(0, 0, 0, 0.16);
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-start {
-      padding: 6px 10px;
-      background: #3ea6ff;
-      color: #fff;
-      border: none;
-      border-radius: 4px;
-      font-size: 12px;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-start:hover {
-      background: #2d88cc;
-    }
-    #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-min-note {
-      font-size: 10px;
-      color: #777;
-      text-align: center;
-      margin-top: 2px;
-    }
-
-    #better-feed-work-unlock {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.78);
-      z-index: 999999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-    }
-    #better-feed-work-unlock .better-feed-work-unlock-card {
-      background: #212121;
-      color: #f1f1f1;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px;
-      padding: 28px;
-      max-width: 560px;
-      width: 100%;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-    }
-    html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-card {
-      background: #fff;
-      color: #0f0f0f;
-      border-color: rgba(0, 0, 0, 0.08);
-    }
-    #better-feed-work-unlock .better-feed-work-unlock-title {
-      font-size: 20px;
-      font-weight: 600;
-      margin: 0 0 8px;
-    }
-    #better-feed-work-unlock .better-feed-work-unlock-sub {
-      font-size: 13px;
-      color: #aaa;
-      line-height: 1.5;
-      margin: 0 0 16px;
-    }
-    html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-sub { color: #606060; }
-    #better-feed-work-unlock .better-feed-work-unlock-code {
-      font-family: ui-monospace, Menlo, Consolas, monospace;
-      font-size: 22px;
-      letter-spacing: 0;
-      text-align: center;
-      padding: 14px 12px;
-      margin-bottom: 14px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
-      word-break: break-all;
-      user-select: none;
-      -webkit-user-select: none;
-    }
-    html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-code {
-      background: #f5f5f5;
-      border-color: rgba(0, 0, 0, 0.1);
-    }
-    #better-feed-work-unlock .better-feed-work-unlock-input {
-      display: block;
-      width: 100%;
-      box-sizing: border-box;
-      padding: 12px 14px;
-      background: rgba(255, 255, 255, 0.06);
-      color: #f1f1f1;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 8px;
-      font-size: 16px;
-      font-family: ui-monospace, Menlo, Consolas, monospace;
-      letter-spacing: 0;
-      margin-bottom: 16px;
-    }
-    html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-input {
-      background: #f5f5f5;
-      color: #0f0f0f;
-      border-color: rgba(0, 0, 0, 0.16);
-    }
-    #better-feed-work-unlock .better-feed-work-unlock-buttons {
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-    }
-    #better-feed-work-unlock button {
-      padding: 9px 16px;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      font-family: inherit;
-      cursor: pointer;
-    }
-    #better-feed-work-unlock .better-feed-work-unlock-cancel {
-      background: #383838;
-      color: #f1f1f1;
-    }
-    html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-cancel {
-      background: #e5e5e5;
-      color: #0f0f0f;
-    }
-    #better-feed-work-unlock .better-feed-work-unlock-cancel:hover { background: #4a4a4a; }
-    html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-cancel:hover { background: #d4d4d4; }
-    #better-feed-work-unlock .better-feed-work-unlock-confirm {
-      background: #3ea6ff;
-      color: #fff;
-    }
-    #better-feed-work-unlock .better-feed-work-unlock-confirm:hover:not(:disabled) { background: #2d88cc; }
-    #better-feed-work-unlock .better-feed-work-unlock-confirm:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-
-    #better-feed-session-length-picker {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.85);
-      z-index: 999998;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
-    }
-    html.better-feed-light-mode #better-feed-session-length-picker {
-      background: rgba(249, 249, 249, 0.95);
-    }
-    #better-feed-session-length-picker .better-feed-mode-picker-inner {
-      max-width: 880px;
-      width: 100%;
-      text-align: center;
-    }
-    #better-feed-session-length-picker .better-feed-mode-picker-title {
-      color: #f1f1f1;
-      font-size: 30px;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      margin: 0 0 24px 0;
-    }
-    html.better-feed-light-mode #better-feed-session-length-picker .better-feed-mode-picker-title { color: #0f0f0f; }
-    #better-feed-session-length-picker .better-feed-mode-cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px;
-    }
-    #better-feed-session-length-picker .better-feed-mode-card {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      padding: 22px 18px;
-      background: transparent;
-      color: #f1f1f1;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 12px;
-      font-family: inherit;
-      font-size: inherit;
-      cursor: pointer;
-      text-align: left;
-      transition: border-color 0.15s, background 0.15s;
-    }
-    html.better-feed-light-mode #better-feed-session-length-picker .better-feed-mode-card {
-      color: #0f0f0f;
-      border-color: rgba(0, 0, 0, 0.12);
-    }
-    #better-feed-session-length-picker .better-feed-mode-card:hover {
-      border-color: #3ea6ff;
-      background: rgba(255, 255, 255, 0.04);
-    }
-    html.better-feed-light-mode #better-feed-session-length-picker .better-feed-mode-card:hover {
-      background: rgba(0, 0, 0, 0.03);
-    }
-    #better-feed-session-length-picker .better-feed-mode-card-name {
-      font-size: 20px;
-      font-weight: 600;
-    }
-    #better-feed-session-length-picker .better-feed-mode-card-desc {
-      font-size: 13px;
-      color: #aaa;
-      line-height: 1.5;
-    }
-    html.better-feed-light-mode #better-feed-session-length-picker .better-feed-mode-card-desc { color: #606060; }
-    #better-feed-session-length-picker .better-feed-custom-session-form {
-      display: none;
-      gap: 12px;
-      align-items: flex-end;
-      justify-content: center;
-      margin-top: 16px;
-      padding-top: 16px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-      flex-wrap: wrap;
-    }
-    html.better-feed-light-mode #better-feed-session-length-picker .better-feed-custom-session-form {
-      border-top-color: rgba(0, 0, 0, 0.08);
-    }
-    #better-feed-session-length-picker .better-feed-custom-session-form label {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font-size: 12px;
-      color: #aaa;
-    }
-    html.better-feed-light-mode #better-feed-session-length-picker .better-feed-custom-session-form label { color: #606060; }
-    #better-feed-session-length-picker .better-feed-custom-session-form input {
-      width: 72px;
-      padding: 8px 10px;
-      background: rgba(255, 255, 255, 0.06);
-      color: #f1f1f1;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      border-radius: 8px;
-      font-size: 16px;
-      font-family: inherit;
-      text-align: center;
-    }
-    html.better-feed-light-mode #better-feed-session-length-picker .better-feed-custom-session-form input {
-      background: #f5f5f5;
-      color: #0f0f0f;
-      border-color: rgba(0, 0, 0, 0.16);
-    }
-    #better-feed-session-length-picker .better-feed-custom-session-start {
-      padding: 10px 18px;
-      background: #3ea6ff;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
-    }
-    #better-feed-session-length-picker .better-feed-custom-session-start:hover {
-      background: #2d88cc;
-    }
-
-    #better-feed-session-ended-popup {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.78);
-      z-index: 999999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-    }
-    #better-feed-session-ended-popup .better-feed-session-ended-card {
-      background: #212121;
-      color: #f1f1f1;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 12px;
-      padding: 28px 32px;
-      max-width: 440px;
-      width: 100%;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-      text-align: center;
-    }
-    html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-session-ended-card {
-      background: #fff;
-      color: #0f0f0f;
-      border-color: rgba(0, 0, 0, 0.08);
-    }
-    #better-feed-session-ended-popup .better-feed-session-ended-title {
-      font-size: 22px;
-      font-weight: 600;
-      margin: 0 0 8px;
-    }
-    #better-feed-session-ended-popup .better-feed-session-ended-sub {
-      font-size: 14px;
-      color: #aaa;
-      margin: 0 0 20px;
-    }
-    html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-session-ended-sub { color: #606060; }
-    #better-feed-session-ended-popup .better-feed-session-ended-buttons {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-    }
-    #better-feed-session-ended-popup button {
-      padding: 10px 24px;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      font-family: inherit;
-      cursor: pointer;
-    }
-    #better-feed-session-ended-popup .better-feed-session-ended-no {
-      background: #383838;
-      color: #f1f1f1;
-    }
-    html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-session-ended-no {
-      background: #e5e5e5;
-      color: #0f0f0f;
-    }
-    #better-feed-session-ended-popup .better-feed-session-ended-no:hover { background: #4a4a4a; }
-    html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-session-ended-no:hover { background: #d4d4d4; }
-    #better-feed-session-ended-popup .better-feed-session-ended-yes {
-      background: #3ea6ff;
-      color: #fff;
-    }
-    #better-feed-session-ended-popup .better-feed-session-ended-yes:hover { background: #2d88cc; }
-
-    #better-feed-mode-switcher {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      height: 32px;
-      padding: 0 12px;
-      margin: 0 8px 0 0;
-      background: rgba(255, 255, 255, 0.08);
-      color: #f1f1f1;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 500;
-      font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
-      cursor: pointer;
-      transition: background 0.15s, border-color 0.15s;
-      white-space: nowrap;
-      flex-shrink: 0;
-      vertical-align: middle;
-    }
-
-    #better-feed-mode-switcher:hover {
-      background: rgba(255, 255, 255, 0.14);
-      border-color: #3ea6ff;
-    }
-
-    html.better-feed-light-mode #better-feed-mode-switcher {
-      background: rgba(0, 0, 0, 0.05);
-      color: #0f0f0f;
-      border-color: rgba(0, 0, 0, 0.12);
-    }
-
-    html.better-feed-light-mode #better-feed-mode-switcher:hover {
-      background: rgba(0, 0, 0, 0.08);
-      border-color: #3ea6ff;
-    }
-
-    #better-feed-mode-switcher .better-feed-mode-switcher-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #3ea6ff;
-      flex-shrink: 0;
-    }
-  `;
-
-  document.documentElement.appendChild(style);
-}
 
 async function applyFeatureSettings() {
   const settings = await getSettings();
@@ -2689,25 +1004,8 @@ async function saveWeeklyVideos(videos, refreshAfter) {
 const VIDEO_METADATA_REBUILD_CONCURRENCY = 4;
 let videoMetadataRebuildInFlight = false;
 
-async function fetchWeeklyVideoMetadataFromOEmbed(videoId) {
-  if (!videoId) return null;
-  try {
-    const target = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
-    const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(target)}&format=json`;
-    const resp = await fetch(url);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (!data || typeof data !== "object") return null;
-    if (!data.title && !data.author_name) return null;
-    return {
-      title: data.title || "",
-      channelName: data.author_name || "",
-      channelUrl: data.author_url || ""
-    };
-  } catch (_) {
-    return null;
-  }
-}
+// fetchVideoMetadataFromOEmbed lives in shared.js (the popup and options
+// page use the same fetcher).
 
 // Single helper used by both the channel-avatar and watch-metrics paths.
 // Streams the response, runs the extractor on the growing buffer, and
@@ -3025,7 +1323,7 @@ async function rebuildVideoMetadataIfNeeded() {
       const jobs = stubs
         .filter(v => !v.title || !v.channelName || !v.channelUrl)
         .map(stub => async () => {
-          const meta = await fetchWeeklyVideoMetadataFromOEmbed(stub.videoId);
+          const meta = await fetchVideoMetadataFromOEmbed(stub.videoId);
           if (meta) results[stub.videoId] = meta;
         });
       await runWithConcurrency(jobs, VIDEO_METADATA_REBUILD_CONCURRENCY);
@@ -3176,12 +1474,10 @@ async function refreshVisibleVideosAfterHide() {
   ]);
 
   if (!settings.enabled || !settings.weeklyHomeEnabled) {
-    removeStyle();
     removeCustomHome();
     return;
   }
 
-  injectStyle();
   let storedVideos = Array.isArray(stored.videos) ? stored.videos : [];
   if (settings.excludeLiveVideos !== false) {
     storedVideos = storedVideos.filter(v => !videoLooksLive(v));
@@ -4204,7 +2500,6 @@ async function onHomePage() {
 
   try {
     if (coldStartActive) {
-      injectStyle();
       if (coldStartAwaitingChoice) {
         if (coldStartView === "refresh-schedule") {
           renderColdStartRefreshSchedule();
@@ -4222,26 +2517,21 @@ async function onHomePage() {
     }
 
     if (isWorkLikeMode(currentMode)) {
-      injectStyle();
       renderWorkPlaceholder();
       return;
     }
 
     if (!isWatchModeActive()) {
-      removeStyle();
       removeCustomHome();
       if (currentMode) markModeReady();
       return;
     }
     const settings = await getSettings();
     if (!settings.enabled || !settings.weeklyHomeEnabled) {
-      removeStyle();
       removeCustomHome();
       markModeReady();
       return;
     }
-
-    injectStyle();
 
     const dailyState = await getDailyState(settings);
     const grace = await getDailyGrace(settings);
@@ -4259,7 +2549,6 @@ async function onHomePage() {
 }
 
 function onNonHomePage() {
-  removeStyle();
   removeCustomHome();
   markModeReady();
 }
@@ -5673,6 +3962,181 @@ function showWorkClockPopover() {
   }, 1000);
 }
 
+/* ---------- DAILY LIMIT ICON ---------- */
+// Hourglass icon to the left of the mode switcher in Watch mode. Click toggles
+// a small popover showing today's videos-watched and time-watched against the
+// configured daily limits. Click outside (or click the icon again) closes it.
+
+const DAILY_LIMIT_BUTTON_ID = "better-feed-daily-limit";
+const DAILY_LIMIT_POPOVER_ID = "better-feed-daily-limit-popover";
+
+function buildDailyLimitButton() {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = DAILY_LIMIT_BUTTON_ID;
+  btn.title = "Daily limit — click for today's stats";
+  // Material Icons "hourglass_empty" path.
+  btn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">' +
+    '<path d="M6 2v6h.01L6 8.01 10 12l-4 4 .01.01H6V22h12v-5.99h-.01L18 16l-4-4 4-3.99-.01-.01H18V2H6zm10 14.5V20H8v-3.5l4-4 4 4zm-4-5l-4-4V4h8v3.5l-4 4z"/>' +
+    "</svg>";
+  btn.addEventListener("click", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleDailyLimitPopover();
+  });
+  return btn;
+}
+
+function tryInsertDailyLimitButton() {
+  if (currentMode !== MODE_WATCH) return false;
+  const anchor = findSwitcherAnchor();
+  if (!anchor) return false;
+
+  let btn = document.getElementById(DAILY_LIMIT_BUTTON_ID);
+  if (!btn) btn = buildDailyLimitButton();
+
+  // Sit to the LEFT of the mode switcher (same slot the work-clock uses in
+  // Work mode — they're mutually exclusive since they key off mode).
+  const switcher = document.getElementById(MODE_SWITCHER_ID);
+  const positionBefore =
+    switcher && switcher.parentElement === anchor.parentElement ? switcher : anchor;
+  const correctlyPlaced =
+    btn.parentElement === positionBefore.parentElement &&
+    btn.nextElementSibling === positionBefore;
+  if (!correctlyPlaced) {
+    positionBefore.parentElement.insertBefore(btn, positionBefore);
+  }
+  return true;
+}
+
+function removeDailyLimitButton() {
+  document.getElementById(DAILY_LIMIT_BUTTON_ID)?.remove();
+  closeDailyLimitPopover();
+}
+
+function ensureDailyLimitButton() {
+  if (currentMode !== MODE_WATCH) {
+    removeDailyLimitButton();
+    return;
+  }
+  tryInsertDailyLimitButton();
+}
+
+function formatDailyLimitDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+async function renderDailyLimitPopoverContent(popover) {
+  popover.replaceChildren();
+
+  const settings = await getSettings();
+  const state = await getDailyState(settings);
+
+  const title = document.createElement("div");
+  title.className = "better-feed-daily-limit-popover-title";
+  title.textContent = "Today";
+  popover.appendChild(title);
+
+  const videosWatched = Array.isArray(state.videoIds) ? state.videoIds.length : 0;
+  const secondsWatched = Number(state.secondsWatched) || 0;
+  const enabled = !!settings.dailyLimitEnabled;
+  const mode = settings.dailyLimitMode || "both";
+
+  const videosRow = document.createElement("div");
+  videosRow.className = "better-feed-daily-limit-popover-row";
+  const videosLabel = document.createElement("span");
+  videosLabel.className = "better-feed-daily-limit-popover-label";
+  videosLabel.textContent = "Videos";
+  const videosValue = document.createElement("span");
+  videosValue.className = "better-feed-daily-limit-popover-value";
+  videosValue.textContent =
+    enabled && mode !== "time"
+      ? `${videosWatched} / ${settings.maxVideosPerDay}`
+      : `${videosWatched}`;
+  videosRow.appendChild(videosLabel);
+  videosRow.appendChild(videosValue);
+  popover.appendChild(videosRow);
+
+  const timeRow = document.createElement("div");
+  timeRow.className = "better-feed-daily-limit-popover-row";
+  const timeLabel = document.createElement("span");
+  timeLabel.className = "better-feed-daily-limit-popover-label";
+  timeLabel.textContent = "Time";
+  const timeValue = document.createElement("span");
+  timeValue.className = "better-feed-daily-limit-popover-value";
+  timeValue.textContent =
+    enabled && mode !== "videos"
+      ? `${formatDailyLimitDuration(secondsWatched)} / ${formatDailyLimitDuration(settings.maxSecondsPerDay)}`
+      : formatDailyLimitDuration(secondsWatched);
+  timeRow.appendChild(timeLabel);
+  timeRow.appendChild(timeValue);
+  popover.appendChild(timeRow);
+
+  if (!enabled) {
+    const note = document.createElement("div");
+    note.className = "better-feed-daily-limit-popover-note";
+    note.textContent = "Daily limit is off.";
+    popover.appendChild(note);
+  }
+}
+
+function refreshDailyLimitPopover() {
+  const popover = document.getElementById(DAILY_LIMIT_POPOVER_ID);
+  if (!popover) return;
+  renderDailyLimitPopoverContent(popover);
+}
+
+function showDailyLimitPopover() {
+  if (document.getElementById(DAILY_LIMIT_POPOVER_ID)) return;
+  const btn = document.getElementById(DAILY_LIMIT_BUTTON_ID);
+  if (!btn) return;
+  if (currentMode !== MODE_WATCH) return;
+
+  const popover = document.createElement("div");
+  popover.id = DAILY_LIMIT_POPOVER_ID;
+  renderDailyLimitPopoverContent(popover);
+
+  document.body.appendChild(popover);
+
+  const rect = btn.getBoundingClientRect();
+  popover.style.position = "fixed";
+  popover.style.top = `${rect.bottom + 8}px`;
+  popover.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+
+  // Defer the outside-click listener so the click that opened us doesn't fire it.
+  setTimeout(() => {
+    document.addEventListener("click", closeDailyLimitPopoverOnOutsideClick);
+  }, 0);
+}
+
+function closeDailyLimitPopover() {
+  document.getElementById(DAILY_LIMIT_POPOVER_ID)?.remove();
+  document.removeEventListener("click", closeDailyLimitPopoverOnOutsideClick);
+}
+
+function closeDailyLimitPopoverOnOutsideClick(e) {
+  const popover = document.getElementById(DAILY_LIMIT_POPOVER_ID);
+  if (!popover) return;
+  if (popover.contains(e.target)) return;
+  const btn = document.getElementById(DAILY_LIMIT_BUTTON_ID);
+  if (btn && btn.contains(e.target)) return;
+  closeDailyLimitPopover();
+}
+
+function toggleDailyLimitPopover() {
+  if (document.getElementById(DAILY_LIMIT_POPOVER_ID)) {
+    closeDailyLimitPopover();
+  } else {
+    showDailyLimitPopover();
+  }
+}
+
 /* ---------- WORK SESSION UNLOCK CHALLENGE ---------- */
 // Lets the user end a session early — but only by typing a fresh 16-20 digit
 // numeric code shown on screen, no spaces, no paste, no select-copy on the
@@ -5681,14 +4145,8 @@ function showWorkClockPopover() {
 
 const WORK_UNLOCK_ID = "better-feed-work-unlock";
 
-function generateUnlockCode() {
-  const length = 16 + Math.floor(Math.random() * 5); // 16-20 inclusive
-  let code = "";
-  for (let i = 0; i < length; i++) {
-    code += String(Math.floor(Math.random() * 10));
-  }
-  return code;
-}
+// generateUnlockCode lives in shared.js so the work-session unlock and the
+// watching-lock unlock can't drift apart.
 
 function renderWorkUnlockModal({ targetMode } = {}) {
   document.getElementById(WORK_UNLOCK_ID)?.remove();
@@ -5876,6 +4334,7 @@ function scheduleSwitcherCheck() {
     switcherCheckScheduled = false;
     tryInsertSwitcher();
     tryInsertWorkClock();
+    tryInsertDailyLimitButton();
   });
 }
 
@@ -5902,15 +4361,43 @@ function ensureModeSwitcher() {
   if (!currentMode) {
     removeModeSwitcher();
     removeWorkClock();
+    removeDailyLimitButton();
     stopMastheadObserver();
     return;
   }
   tryInsertSwitcher();
   ensureWorkClock();
+  ensureDailyLimitButton();
   startMastheadObserver();
 }
 
 let inOnModePicked = 0;
+
+// Trigger playback on the current /watch page's video element. Retries
+// briefly because on a hard navigation the <video> tag may not be in the
+// DOM yet when the mode is picked. The originating click on the picker
+// satisfies the browser's user-gesture requirement for audio autoplay
+// only while the gesture is "fresh", so we poll quickly and stop early
+// once a video element appears.
+function playActiveVideoSoon() {
+  let attempts = 0;
+  const maxAttempts = 20; // 20 * 100ms = up to 2s of waiting
+  const tryPlay = () => {
+    if (location.pathname !== "/watch") return;
+    const videoEl = getActiveVideoEl();
+    if (videoEl) {
+      try {
+        const p = videoEl.play();
+        if (p && typeof p.catch === "function") p.catch(() => {});
+      } catch (_) {}
+      return;
+    }
+    if (++attempts < maxAttempts) {
+      setTimeout(tryPlay, 100);
+    }
+  };
+  tryPlay();
+}
 
 async function onModePicked(mode) {
   if (!VALID_MODES.includes(mode)) return;
@@ -5931,8 +4418,17 @@ async function onModePicked(mode) {
   const startingPath = location.pathname;
   const startingHash = location.hash;
   const targetHash = markerHashForMode(mode);
-  const startedAtHome =
+  const startedAtTargetMarker =
     startingPath === "/feed/library" && startingHash === targetHash;
+  // "Home-ish" means a page that's either the vanilla YouTube home or one of
+  // our marker URLs. Picking a mode on those pages should navigate to the new
+  // mode's marker URL. Any other page (watch, search, channel, playlist, etc.)
+  // is somewhere the user intentionally went — we apply the mode in place and
+  // leave them on the page they came for.
+  const onHomeishPage =
+    startingPath === "/" ||
+    (startingPath === "/feed/library" && MARKER_HASHES.has(startingHash));
+  const shouldNavigateToMarker = onHomeishPage && !startedAtTargetMarker;
 
   const prev = currentMode;
   inOnModePicked++;
@@ -5942,7 +4438,7 @@ async function onModePicked(mode) {
     modeLoaded = true;
     freshTabAwaitingMode = false;
 
-    if (!startedAtHome) {
+    if (shouldNavigateToMarker) {
       // Picker stays opaque during the navigation wait; the new page's
       // pre-ready background carries the dark color through and then
       // fades in the new mode UI. The storage listener's in-place
@@ -5952,9 +4448,17 @@ async function onModePicked(mode) {
       return;
     }
 
-    // Already on the mode's home page — just fade the picker out and
-    // update the in-page state.
+    // Either already at the target marker, or on a specific content page
+    // (e.g. /watch from an external link). Fade the picker out and update
+    // in-page state without moving the user off the page they came for.
     removeModePicker();
+    // If they landed on /watch and just picked a mode, the click that
+    // dismissed the picker counts as the user gesture browsers require for
+    // audio-enabled autoplay. Kick the player off so the user doesn't have
+    // to chase down the play button after committing to a mode.
+    if (location.pathname === "/watch") {
+      playActiveVideoSoon();
+    }
     syncUrlToMode();
     ensureModeSwitcher();
     await applyFeatureSettings();
@@ -6049,7 +4553,6 @@ function update() {
 
 /* ---------- INIT ---------- */
 
-injectFeatureStyle();
 applyFeatureSettings();
 detectAndApplyTheme();
 ensureThemeObserver();
@@ -6700,6 +5203,7 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
   if (SETTINGS_KEY in changes) {
     applyFeatureSettings();
     update();
+    refreshDailyLimitPopover();
   }
 
   if (STORAGE_VIDEOS_KEY in changes) {
@@ -6722,6 +5226,7 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
 
   if (STORAGE_DAILY_STATE_KEY in changes) {
     update();
+    refreshDailyLimitPopover();
   }
 
   if (STORAGE_DAILY_GRACE_KEY in changes) {

@@ -156,3 +156,17 @@ html.better-feed-pre-ready ytd-app {
 @media (prefers-color-scheme: light) {
   html.better-feed-pre-ready { background: #f9f9f9 !important; }
 }
+
+/* When BetterFeed centers the watch-page player (with recommendations and
+   side panels hidden), YouTube's own #columns / #primary containers can
+   retain widths that overflow the viewport, creating a horizontal
+   scrollbar. The arrow-key seek keystroke then double-fires as a
+   browser-level "scroll right." Suppress horizontal scrolling whenever
+   our mode classes are present — we don't use horizontal layouts
+   anywhere in the extension, so there's nothing legitimate to scroll
+   sideways. */
+html.better-feed-watch-mode,
+html.better-feed-work-mode,
+html.better-feed-marker-mode {
+  overflow-x: clip;
+}

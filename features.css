@@ -1,0 +1,1206 @@
+/* =============================================================================
+ * features.css — feature-toggle rules and the rest of BetterFeed's chrome.
+ *
+ * Two kinds of rules live here:
+ *   1. The `html.better-feed-hide-*` / `better-feed-disable-*` toggles that
+ *      back the "Cleanup" settings (Shorts, comments, autoplay, etc.). The
+ *      toggle classes are set on <html> by applyFeatureSettings() in
+ *      content.js based on the current settings.
+ *   2. The reusable overlay / modal / popover surfaces (mode picker,
+ *      work-clock, session-length picker, daily-limit popup, see-you popup,
+ *      channel-confirm, unlock challenge, session-ended popup, masthead
+ *      switcher chip). These don't need to be conditional — the JS creates
+ *      and destroys the DOM nodes they target.
+ *
+ * Loaded by the manifest at content_script time. The toggle classes are
+ * inert when not present on <html>; the modal rules are inert when the
+ * matching DOM nodes don't exist.
+ *
+ * Mirrored constants in content.js: BODY_CLASS_HIDE_SHORTS,
+ * BODY_CLASS_HIDE_WATCH_RECS, BODY_CLASS_DISABLE_AUTOPLAY, etc. If you
+ * change a class name, change both.
+ * ============================================================================= */
+
+html.better-feed-hide-shorts ytd-rich-shelf-renderer[is-shorts],
+html.better-feed-hide-shorts ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
+html.better-feed-hide-shorts ytd-reel-shelf-renderer,
+html.better-feed-hide-shorts ytd-shelf-renderer:has(ytd-reel-item-renderer),
+html.better-feed-hide-shorts ytd-guide-entry-renderer:has(a[title="Shorts"]),
+html.better-feed-hide-shorts ytd-mini-guide-entry-renderer[aria-label="Shorts"],
+html.better-feed-hide-shorts ytd-video-renderer:has(a[href*="/shorts/"]),
+html.better-feed-hide-shorts ytd-grid-video-renderer:has(a[href*="/shorts/"]),
+html.better-feed-hide-shorts ytd-rich-item-renderer:has(a[href*="/shorts/"]),
+html.better-feed-hide-shorts ytd-compact-video-renderer:has(a[href*="/shorts/"]),
+html.better-feed-hide-shorts yt-lockup-view-model:has(a[href*="/shorts/"]),
+html.better-feed-hide-shorts ytm-shorts-lockup-view-model,
+html.better-feed-hide-shorts ytm-shorts-lockup-view-model-v2,
+html.better-feed-hide-shorts grid-shelf-view-model:has(ytm-shorts-lockup-view-model) {
+  display: none !important;
+}
+
+html.better-feed-hide-watch-recs #related,
+html.better-feed-hide-watch-recs ytd-watch-next-secondary-results-renderer {
+  display: none !important;
+}
+
+html.better-feed-hide-watch-recs ytd-watch-flexy:not(:has(ytd-live-chat-frame)) #secondary.ytd-watch-flexy,
+html.better-feed-hide-watch-recs.better-feed-hide-live-chat #secondary.ytd-watch-flexy {
+  display: none !important;
+}
+
+html.better-feed-hide-watch-recs ytd-watch-flexy:not([theater]):not(:has(ytd-live-chat-frame)) #columns.ytd-watch-flexy,
+html.better-feed-hide-watch-recs.better-feed-hide-live-chat ytd-watch-flexy:not([theater]) #columns.ytd-watch-flexy,
+html.better-feed-hide-watch-recs.better-feed-hide-watch-side-panel ytd-watch-flexy:not([theater]) #columns.ytd-watch-flexy {
+  justify-content: center !important;
+}
+
+html.better-feed-hide-watch-recs ytd-watch-flexy:not([theater]):not(:has(ytd-live-chat-frame)) #primary.ytd-watch-flexy,
+html.better-feed-hide-watch-recs.better-feed-hide-live-chat ytd-watch-flexy:not([theater]) #primary.ytd-watch-flexy,
+html.better-feed-hide-watch-recs.better-feed-hide-watch-side-panel ytd-watch-flexy:not([theater]) #primary.ytd-watch-flexy {
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+html.better-feed-disable-autoplay .ytp-autonav-endscreen-upnext-container,
+html.better-feed-disable-autoplay .ytp-autonav-endscreen,
+html.better-feed-disable-autoplay .ytp-upnext {
+  display: none !important;
+}
+
+html.better-feed-hide-end-screen-cards .ytp-endscreen-content,
+html.better-feed-hide-end-screen-cards .ytp-ce-element,
+html.better-feed-hide-end-screen-cards .ytp-ce-covering-overlay,
+html.better-feed-hide-end-screen-cards .ytp-fullscreen-grid,
+html.better-feed-hide-end-screen-cards .ytp-modern-videowall-still,
+html.better-feed-hide-end-screen-cards .ytp-suggestion-set {
+  display: none !important;
+}
+
+html.better-feed-hide-live-chat ytd-live-chat-frame,
+html.better-feed-hide-live-chat ytd-live-chat-frame#chat,
+html.better-feed-hide-live-chat #chat-container.ytd-watch-flexy {
+  display: none !important;
+}
+
+html.better-feed-hide-watch-side-panel ytd-watch-flexy #fixed-side-menu,
+html.better-feed-hide-watch-side-panel ytd-watch-flexy yt-side-rail-view-model,
+html.better-feed-hide-watch-side-panel ytd-watch-flexy #panels,
+html.better-feed-hide-watch-side-panel ytd-watch-flexy #panels-full-bleed-container,
+html.better-feed-hide-watch-side-panel ytd-watch-flexy ytd-engagement-panel-section-list-renderer {
+  display: none !important;
+}
+
+html.better-feed-hide-watch-side-panel ytd-watch-flexy #columns.ytd-watch-flexy::after {
+  display: none !important;
+  content: none !important;
+  width: 0 !important;
+}
+
+html.better-feed-hide-comments ytd-comments,
+html.better-feed-hide-comments ytd-comments#comments,
+html.better-feed-hide-comments #comments.ytd-watch-flexy {
+  display: none !important;
+}
+
+html.better-feed-hide-notification-bell ytd-notification-topbar-button-renderer {
+  display: none !important;
+}
+
+html.better-feed-hide-explore-trending ytd-guide-section-renderer:has(a[title="Trending"]),
+html.better-feed-hide-explore-trending ytd-guide-section-renderer:has(a[title="Movies & TV"]),
+html.better-feed-hide-explore-trending ytd-guide-section-renderer:has(a[title="Shopping"]),
+html.better-feed-hide-explore-trending ytd-guide-section-renderer:has(a[title="Gaming"]),
+html.better-feed-hide-explore-trending ytd-guide-entry-renderer:has(a[title="Trending"]),
+html.better-feed-hide-explore-trending ytd-mini-guide-entry-renderer[aria-label="Trending"] {
+  display: none !important;
+}
+
+html.better-feed-hide-more-from-youtube ytd-guide-section-renderer:has(a[title="YouTube Premium"]),
+html.better-feed-hide-more-from-youtube ytd-guide-section-renderer:has(a[title="YouTube TV"]),
+html.better-feed-hide-more-from-youtube ytd-guide-section-renderer:has(a[title="YouTube Music"]),
+html.better-feed-hide-more-from-youtube ytd-guide-section-renderer:has(a[title="YouTube Kids"]) {
+  display: none !important;
+}
+
+html.better-feed-hide-mix-radio-playlists ytd-radio-renderer,
+html.better-feed-hide-mix-radio-playlists ytd-compact-radio-renderer,
+html.better-feed-hide-mix-radio-playlists ytd-rich-item-renderer:has(a[href*="list=RD"]),
+html.better-feed-hide-mix-radio-playlists yt-lockup-view-model:has(a[href*="list=RD"]) {
+  display: none !important;
+}
+
+html.better-feed-hide-voice-search #voice-search-button,
+html.better-feed-hide-voice-search ytd-masthead #voice-search-button {
+  display: none !important;
+}
+
+html.better-feed-hide-create-button ytd-masthead ytd-button-renderer:has(button[aria-label="Create"]),
+html.better-feed-hide-create-button ytd-masthead ytd-topbar-menu-button-renderer:has(button[aria-label="Create"]),
+html.better-feed-hide-create-button ytd-masthead button[aria-label="Create"] {
+  display: none !important;
+}
+
+#better-feed-daily-popup {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
+}
+
+#better-feed-daily-popup .better-feed-daily-popup-card {
+  background: #212121;
+  color: #f1f1f1;
+  border-radius: 12px;
+  padding: 32px;
+  max-width: 420px;
+  width: calc(100% - 48px);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+html.better-feed-light-mode #better-feed-daily-popup .better-feed-daily-popup-card {
+  background: #ffffff;
+  color: #0f0f0f;
+}
+
+#better-feed-daily-popup h2 {
+  margin: 0 0 8px 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+#better-feed-daily-popup p {
+  margin: 0 0 24px 0;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+#better-feed-daily-popup .better-feed-daily-popup-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#better-feed-daily-popup button {
+  padding: 12px 20px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  background: #3ea6ff;
+  color: #fff;
+  transition: background 0.15s;
+}
+
+#better-feed-daily-popup button:hover {
+  background: #2d88cc;
+}
+
+#better-feed-daily-popup button.secondary {
+  background: #383838;
+  color: #f1f1f1;
+}
+
+html.better-feed-light-mode #better-feed-daily-popup button.secondary {
+  background: #e5e5e5;
+  color: #0f0f0f;
+}
+
+#better-feed-daily-popup button.secondary:hover {
+  background: #4a4a4a;
+}
+
+html.better-feed-light-mode #better-feed-daily-popup button.secondary:hover {
+  background: #d4d4d4;
+}
+
+#better-feed-channel-confirm {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
+}
+
+#better-feed-channel-confirm .better-feed-channel-confirm-card {
+  background: #212121;
+  color: #f1f1f1;
+  border-radius: 12px;
+  padding: 32px;
+  max-width: 460px;
+  width: calc(100% - 48px);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+html.better-feed-light-mode #better-feed-channel-confirm .better-feed-channel-confirm-card {
+  background: #ffffff;
+  color: #0f0f0f;
+}
+
+#better-feed-channel-confirm h2 {
+  margin: 0 0 12px 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+#better-feed-channel-confirm p {
+  margin: 0 0 24px 0;
+  font-size: 14px;
+  opacity: 0.8;
+  line-height: 1.5;
+}
+
+#better-feed-channel-confirm .better-feed-channel-confirm-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+#better-feed-channel-confirm button {
+  flex: 1;
+  padding: 12px 20px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+#better-feed-channel-confirm button.primary {
+  background: #3ea6ff;
+  color: #fff;
+}
+
+#better-feed-channel-confirm button.primary:hover {
+  background: #2d88cc;
+}
+
+#better-feed-channel-confirm button.secondary {
+  background: #383838;
+  color: #f1f1f1;
+}
+
+html.better-feed-light-mode #better-feed-channel-confirm button.secondary {
+  background: #e5e5e5;
+  color: #0f0f0f;
+}
+
+#better-feed-channel-confirm button.secondary:hover {
+  background: #4a4a4a;
+}
+
+html.better-feed-light-mode #better-feed-channel-confirm button.secondary:hover {
+  background: #d4d4d4;
+}
+
+#better-feed-mode-picker {
+  position: fixed;
+  inset: 0;
+  background: #0f0f0f;
+  z-index: 999998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
+  opacity: 0;
+  transition: opacity 220ms ease-out;
+}
+
+#better-feed-mode-picker.better-feed-picker-visible {
+  opacity: 1;
+}
+
+#better-feed-mode-picker.better-feed-picker-closing {
+  opacity: 0;
+  pointer-events: none;
+}
+
+html.better-feed-light-mode #better-feed-mode-picker {
+  background: #f9f9f9;
+}
+
+#better-feed-mode-picker .better-feed-mode-picker-inner {
+  max-width: 880px;
+  width: 100%;
+  text-align: center;
+}
+
+#better-feed-mode-picker .better-feed-mode-picker-title {
+  color: #f1f1f1;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 8px 0;
+}
+
+#better-feed-mode-picker .better-feed-mode-picker-sub {
+  color: #aaa;
+  font-size: 15px;
+  margin: 0 0 36px 0;
+}
+
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-picker-title { color: #0f0f0f; }
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-picker-sub { color: #606060; }
+
+#better-feed-mode-picker .better-feed-mode-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 760px) {
+  #better-feed-mode-picker .better-feed-mode-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+#better-feed-mode-picker .better-feed-mode-card {
+  background: #1f1f1f;
+  border: 1px solid #2a2a2a;
+  border-radius: 14px;
+  padding: 28px 22px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.05s;
+  color: #f1f1f1;
+  font-family: inherit;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card {
+  background: #fff;
+  border-color: #e5e5e5;
+  color: #0f0f0f;
+}
+
+#better-feed-mode-picker .better-feed-mode-card:hover {
+  border-color: #3ea6ff;
+  background: #232323;
+}
+
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card:hover {
+  background: #f8f8f8;
+}
+
+#better-feed-mode-picker .better-feed-mode-card:active {
+  transform: translateY(1px);
+}
+
+#better-feed-mode-picker .better-feed-mode-card-name {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+#better-feed-mode-picker .better-feed-mode-card-desc {
+  font-size: 13px;
+  color: #aaa;
+  line-height: 1.5;
+}
+
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card-desc { color: #606060; }
+
+#better-feed-mode-picker .better-feed-mode-card-locked {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+#better-feed-mode-picker .better-feed-mode-card-locked:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: transparent;
+}
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card-locked:hover {
+  background: transparent;
+}
+
+#better-feed-mode-picker .better-feed-custom-session-form {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: center;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+}
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-custom-session-form {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+#better-feed-mode-picker .better-feed-custom-session-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #aaa;
+}
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-custom-session-form label { color: #606060; }
+#better-feed-mode-picker .better-feed-custom-session-form input {
+  width: 72px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  font-size: 16px;
+  font-family: inherit;
+  text-align: center;
+}
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-custom-session-form input {
+  background: #f5f5f5;
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.16);
+}
+#better-feed-mode-picker .better-feed-custom-session-start {
+  padding: 10px 18px;
+  background: #3ea6ff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+#better-feed-mode-picker .better-feed-custom-session-start:hover {
+  background: #2d88cc;
+}
+#better-feed-mode-picker .better-feed-custom-session-min-note,
+#better-feed-session-length-picker .better-feed-custom-session-min-note {
+  flex-basis: 100%;
+  text-align: center;
+  font-size: 12px;
+  color: #777;
+  margin-top: 4px;
+}
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-custom-session-min-note,
+html.better-feed-light-mode #better-feed-session-length-picker .better-feed-custom-session-min-note {
+  color: #888;
+}
+
+/* Back link in the full pickers — sits below the session-length cards
+   (and below the custom form when it's expanded), centered. */
+#better-feed-mode-picker .better-feed-session-length-back,
+#better-feed-session-length-picker .better-feed-session-length-back {
+  display: inline-block;
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 8px 16px;
+  margin-top: 24px;
+}
+
+/* X close in the top-right of the mode picker. */
+#better-feed-mode-picker .better-feed-mode-picker-close {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 34px;
+  font-weight: 100;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 10px;
+}
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-picker-close {
+  color: #606060;
+}
+#better-feed-mode-picker .better-feed-mode-picker-close:hover {
+  color: #f1f1f1;
+}
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-picker-close:hover {
+  color: #0f0f0f;
+}
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-session-length-back,
+html.better-feed-light-mode #better-feed-session-length-picker .better-feed-session-length-back {
+  color: #606060;
+}
+#better-feed-mode-picker .better-feed-session-length-back:hover,
+#better-feed-session-length-picker .better-feed-session-length-back:hover {
+  color: #f1f1f1;
+}
+html.better-feed-light-mode #better-feed-mode-picker .better-feed-session-length-back:hover,
+html.better-feed-light-mode #better-feed-session-length-picker .better-feed-session-length-back:hover {
+  color: #0f0f0f;
+}
+
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-session-length-back {
+  background: none;
+  border: none;
+  color: #aaa;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 0;
+  margin: 0 0 6px 0;
+  align-self: flex-start;
+}
+html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-session-length-back {
+  color: #606060;
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-session-length-back:hover {
+  color: inherit;
+}
+
+/* Session-length picker: four equal-width cards in a single row, centered
+   and capped so they don't stretch into dead space. */
+#better-feed-mode-picker .better-feed-session-length-cards,
+#better-feed-session-length-picker .better-feed-session-length-cards {
+  grid-template-columns: repeat(4, 1fr);
+  max-width: 760px;
+  margin: 0 auto;
+  gap: 12px;
+}
+#better-feed-mode-picker .better-feed-session-length-cards .better-feed-mode-card,
+#better-feed-session-length-picker .better-feed-session-length-cards .better-feed-mode-card {
+  padding: 20px 16px;
+  gap: 6px;
+  text-align: center;
+  align-items: center;
+  justify-content: center;
+}
+#better-feed-mode-picker .better-feed-session-length-cards .better-feed-mode-card-name,
+#better-feed-session-length-picker .better-feed-session-length-cards .better-feed-mode-card-name {
+  font-size: 17px;
+}
+#better-feed-mode-picker .better-feed-session-length-cards .better-feed-mode-card-desc,
+#better-feed-session-length-picker .better-feed-session-length-cards .better-feed-mode-card-desc {
+  font-size: 12px;
+  line-height: 1.4;
+}
+/* Wrap to 2x2 on narrower screens, then 1 col on very narrow. */
+@media (max-width: 720px) {
+  #better-feed-mode-picker .better-feed-session-length-cards,
+  #better-feed-session-length-picker .better-feed-session-length-cards {
+    grid-template-columns: repeat(2, 1fr);
+    max-width: 460px;
+  }
+}
+@media (max-width: 420px) {
+  #better-feed-mode-picker .better-feed-session-length-cards,
+  #better-feed-session-length-picker .better-feed-session-length-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+#better-feed-work-clock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: 0 6px 0 0;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  cursor: pointer;
+  padding: 0;
+}
+html.better-feed-light-mode #better-feed-work-clock {
+  background: rgba(0, 0, 0, 0.05);
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+#better-feed-work-clock:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+html.better-feed-light-mode #better-feed-work-clock:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+#better-feed-work-clock-popover {
+  z-index: 999999;
+  padding: 10px 14px;
+  background: #212121;
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 180px;
+}
+html.better-feed-light-mode #better-feed-work-clock-popover {
+  background: #fff;
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+#better-feed-work-clock-popover .better-feed-work-clock-end-btn {
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+html.better-feed-light-mode #better-feed-work-clock-popover .better-feed-work-clock-end-btn {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+#better-feed-work-clock-popover .better-feed-work-clock-end-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+html.better-feed-light-mode #better-feed-work-clock-popover .better-feed-work-clock-end-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* Inline session-length picker inside the clock popover. */
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting {
+  min-width: 240px;
+  padding: 12px;
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-picker-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 10px;
+  text-align: center;
+  color: inherit;
+  letter-spacing: 0;
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: center;
+  align-items: center;
+}
+html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card:hover {
+  border-color: #3ea6ff;
+  background: rgba(255, 255, 255, 0.08);
+}
+html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+/* Hide the verbose descriptions in popover context — names alone are
+   enough at this scale. */
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card-desc {
+  display: none;
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: #aaa;
+}
+html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form label {
+  color: #606060;
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form input {
+  width: 64px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  text-align: center;
+}
+html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-form input {
+  background: #f5f5f5;
+  border-color: rgba(0, 0, 0, 0.16);
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-start {
+  padding: 6px 10px;
+  background: #3ea6ff;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-start:hover {
+  background: #2d88cc;
+}
+#better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-min-note {
+  font-size: 10px;
+  color: #777;
+  text-align: center;
+  margin-top: 2px;
+}
+
+#better-feed-work-unlock {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+#better-feed-work-unlock .better-feed-work-unlock-card {
+  background: #212121;
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 28px;
+  max-width: 560px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-card {
+  background: #fff;
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.08);
+}
+#better-feed-work-unlock .better-feed-work-unlock-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+#better-feed-work-unlock .better-feed-work-unlock-sub {
+  font-size: 13px;
+  color: #aaa;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-sub { color: #606060; }
+#better-feed-work-unlock .better-feed-work-unlock-code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 22px;
+  letter-spacing: 0;
+  text-align: center;
+  padding: 14px 12px;
+  margin-bottom: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  word-break: break-all;
+  user-select: none;
+  -webkit-user-select: none;
+}
+html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-code {
+  background: #f5f5f5;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+#better-feed-work-unlock .better-feed-work-unlock-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  font-size: 16px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  letter-spacing: 0;
+  margin-bottom: 16px;
+}
+html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-input {
+  background: #f5f5f5;
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.16);
+}
+#better-feed-work-unlock .better-feed-work-unlock-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+#better-feed-work-unlock button {
+  padding: 9px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+#better-feed-work-unlock .better-feed-work-unlock-cancel {
+  background: #383838;
+  color: #f1f1f1;
+}
+html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-cancel {
+  background: #e5e5e5;
+  color: #0f0f0f;
+}
+#better-feed-work-unlock .better-feed-work-unlock-cancel:hover { background: #4a4a4a; }
+html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-cancel:hover { background: #d4d4d4; }
+#better-feed-work-unlock .better-feed-work-unlock-confirm {
+  background: #3ea6ff;
+  color: #fff;
+}
+#better-feed-work-unlock .better-feed-work-unlock-confirm:hover:not(:disabled) { background: #2d88cc; }
+#better-feed-work-unlock .better-feed-work-unlock-confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#better-feed-session-length-picker {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 999998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
+}
+html.better-feed-light-mode #better-feed-session-length-picker {
+  background: rgba(249, 249, 249, 0.95);
+}
+#better-feed-session-length-picker .better-feed-mode-picker-inner {
+  max-width: 880px;
+  width: 100%;
+  text-align: center;
+}
+#better-feed-session-length-picker .better-feed-mode-picker-title {
+  color: #f1f1f1;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 24px 0;
+}
+html.better-feed-light-mode #better-feed-session-length-picker .better-feed-mode-picker-title { color: #0f0f0f; }
+#better-feed-session-length-picker .better-feed-mode-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+#better-feed-session-length-picker .better-feed-mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 18px;
+  background: transparent;
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+html.better-feed-light-mode #better-feed-session-length-picker .better-feed-mode-card {
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+#better-feed-session-length-picker .better-feed-mode-card:hover {
+  border-color: #3ea6ff;
+  background: rgba(255, 255, 255, 0.04);
+}
+html.better-feed-light-mode #better-feed-session-length-picker .better-feed-mode-card:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+#better-feed-session-length-picker .better-feed-mode-card-name {
+  font-size: 20px;
+  font-weight: 600;
+}
+#better-feed-session-length-picker .better-feed-mode-card-desc {
+  font-size: 13px;
+  color: #aaa;
+  line-height: 1.5;
+}
+html.better-feed-light-mode #better-feed-session-length-picker .better-feed-mode-card-desc { color: #606060; }
+#better-feed-session-length-picker .better-feed-custom-session-form {
+  display: none;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: center;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+}
+html.better-feed-light-mode #better-feed-session-length-picker .better-feed-custom-session-form {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+#better-feed-session-length-picker .better-feed-custom-session-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #aaa;
+}
+html.better-feed-light-mode #better-feed-session-length-picker .better-feed-custom-session-form label { color: #606060; }
+#better-feed-session-length-picker .better-feed-custom-session-form input {
+  width: 72px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  font-size: 16px;
+  font-family: inherit;
+  text-align: center;
+}
+html.better-feed-light-mode #better-feed-session-length-picker .better-feed-custom-session-form input {
+  background: #f5f5f5;
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.16);
+}
+#better-feed-session-length-picker .better-feed-custom-session-start {
+  padding: 10px 18px;
+  background: #3ea6ff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+#better-feed-session-length-picker .better-feed-custom-session-start:hover {
+  background: #2d88cc;
+}
+
+#better-feed-session-ended-popup {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+#better-feed-session-ended-popup .better-feed-session-ended-card {
+  background: #212121;
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 28px 32px;
+  max-width: 440px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-session-ended-card {
+  background: #fff;
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.08);
+}
+#better-feed-session-ended-popup .better-feed-session-ended-title {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+#better-feed-session-ended-popup .better-feed-session-ended-sub {
+  font-size: 14px;
+  color: #aaa;
+  margin: 0 0 20px;
+}
+html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-session-ended-sub { color: #606060; }
+#better-feed-session-ended-popup .better-feed-session-ended-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+#better-feed-session-ended-popup button {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+#better-feed-session-ended-popup .better-feed-session-ended-no {
+  background: #383838;
+  color: #f1f1f1;
+}
+html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-session-ended-no {
+  background: #e5e5e5;
+  color: #0f0f0f;
+}
+#better-feed-session-ended-popup .better-feed-session-ended-no:hover { background: #4a4a4a; }
+html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-session-ended-no:hover { background: #d4d4d4; }
+#better-feed-session-ended-popup .better-feed-session-ended-yes {
+  background: #3ea6ff;
+  color: #fff;
+}
+#better-feed-session-ended-popup .better-feed-session-ended-yes:hover { background: #2d88cc; }
+
+#better-feed-mode-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  margin: 0 8px 0 0;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+#better-feed-mode-switcher:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: #3ea6ff;
+}
+
+html.better-feed-light-mode #better-feed-mode-switcher {
+  background: rgba(0, 0, 0, 0.05);
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+html.better-feed-light-mode #better-feed-mode-switcher:hover {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: #3ea6ff;
+}
+
+#better-feed-mode-switcher .better-feed-mode-switcher-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3ea6ff;
+  flex-shrink: 0;
+}
+
+/* Daily-limit hourglass icon — sits left of the mode switcher in Watch mode,
+   mirrors the work-clock styling so the two chips look related. */
+#better-feed-daily-limit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: 0 6px 0 0;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  cursor: pointer;
+  padding: 0;
+}
+html.better-feed-light-mode #better-feed-daily-limit {
+  background: rgba(0, 0, 0, 0.05);
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.12);
+}
+#better-feed-daily-limit:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+html.better-feed-light-mode #better-feed-daily-limit:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+#better-feed-daily-limit-popover {
+  z-index: 999999;
+  padding: 12px 14px;
+  background: #212121;
+  color: #f1f1f1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-family: "YouTube Sans", "Roboto", "Arial", sans-serif;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+html.better-feed-light-mode #better-feed-daily-limit-popover {
+  background: #fff;
+  color: #0f0f0f;
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+#better-feed-daily-limit-popover .better-feed-daily-limit-popover-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #aaa;
+  margin: 0 0 2px 0;
+}
+html.better-feed-light-mode #better-feed-daily-limit-popover .better-feed-daily-limit-popover-title {
+  color: #606060;
+}
+
+#better-feed-daily-limit-popover .better-feed-daily-limit-popover-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+#better-feed-daily-limit-popover .better-feed-daily-limit-popover-value {
+  font-weight: 600;
+}
+
+#better-feed-daily-limit-popover .better-feed-daily-limit-popover-note {
+  font-size: 11px;
+  color: #aaa;
+  margin-top: 4px;
+}
+html.better-feed-light-mode #better-feed-daily-limit-popover .better-feed-daily-limit-popover-note {
+  color: #606060;
+}

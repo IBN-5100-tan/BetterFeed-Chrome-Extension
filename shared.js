@@ -287,6 +287,46 @@ async function priorityWriteSync(items, priority) {
   return false;
 }
 
+// 16–20 digit numeric code used as the typed-confirmation challenge in both
+// the work-session unlock (content.js) and the watching-lock unlock
+// (options.js). Long enough that copy-by-memory is annoying; short enough
+// that typing it is still feasible.
+function generateUnlockCode() {
+  const length = 16 + Math.floor(Math.random() * 5); // 16–20 inclusive
+  let code = "";
+  for (let i = 0; i < length; i++) {
+    code += String(Math.floor(Math.random() * 10));
+  }
+  return code;
+}
+
+// YouTube's public oEmbed endpoint. Used to recover a video's title,
+// channel name, and channel URL from just the videoId — needed in three
+// places (the weekly grid in content.js after a sync hydrate, the popup's
+// hidden-items list, and the options page's hidden-items list), so it
+// lives in shared.js to keep them from drifting.
+const OEMBED_CONCURRENCY = 4;
+
+async function fetchVideoMetadataFromOEmbed(videoId) {
+  if (!videoId) return null;
+  try {
+    const target = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(target)}&format=json`;
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data || typeof data !== "object") return null;
+    if (!data.title && !data.author_name) return null;
+    return {
+      title: data.title || "",
+      channelName: data.author_name || "",
+      channelUrl: data.author_url || ""
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
 function mergeHiddenIds(localIds, syncIds) {
   const seen = new Set(localIds);
   const result = [...localIds];

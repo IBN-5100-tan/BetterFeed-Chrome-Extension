@@ -633,32 +633,10 @@ function initialPageFromHash() {
   return valid.includes(hash) ? hash : "refresh";
 }
 
-// Pull missing video metadata from YouTube's public oEmbed endpoint. Used to
-// recover titles + channel names after the metadata was lost (e.g., after
-// uninstalling and reinstalling the extension — only IDs survived in sync).
+// fetchVideoMetadataFromOEmbed + OEMBED_CONCURRENCY live in shared.js so
+// the popup, options page, and content script all use the same fetcher.
 // Results are persisted via modifyHidden so the next render reads them from
 // storage and so the recovered metadata syncs back across devices.
-const OEMBED_CONCURRENCY = 4;
-
-async function fetchVideoMetadataFromOEmbed(videoId) {
-  if (!videoId) return null;
-  try {
-    const target = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
-    const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(target)}&format=json`;
-    const resp = await fetch(url);
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    if (!data || typeof data !== "object") return null;
-    if (!data.title && !data.author_name) return null;
-    return {
-      type: "video",
-      title: data.title || "",
-      channelName: data.author_name || ""
-    };
-  } catch (_) {
-    return null;
-  }
-}
 
 async function backfillMissingHiddenVideoMetadata() {
   const { videos, metadata } = await getHiddenItemsWithMetadata();
@@ -679,7 +657,7 @@ async function backfillMissingHiddenVideoMetadata() {
   await modifyHidden(state => {
     if (!state.metadata) state.metadata = {};
     for (const [id, m] of Object.entries(fetched)) {
-      if (!state.metadata[id]?.title) state.metadata[id] = m;
+      if (!state.metadata[id]?.title) state.metadata[id] = { type: "video", ...m };
     }
   });
   renderHiddenItems();
@@ -991,14 +969,8 @@ async function applyWatchingLockToAllSections() {
 
 /* ---------- UNLOCK MODAL ---------- */
 
-function generateUnlockCode() {
-  const length = 16 + Math.floor(Math.random() * 5); // 16–20 inclusive
-  let code = "";
-  for (let i = 0; i < length; i++) {
-    code += String(Math.floor(Math.random() * 10));
-  }
-  return code;
-}
+// generateUnlockCode is defined in shared.js so the watching-lock and the
+// work-session unlock can't drift apart.
 
 function renderUnlockModal({ onUnlock }) {
   document.querySelectorAll(".unlock-modal").forEach(el => el.remove());
