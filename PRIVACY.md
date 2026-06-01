@@ -38,8 +38,7 @@ BetterFeed is installed:
 
 The extension also writes the active mode (`watch`, `work`, or `listen`)
 to `localStorage` so the extension can apply mode-specific styling
-synchronously at page load. A short-lived `sessionStorage` flag is set
-and cleared during the refresh bounce sequence; it does not persist.
+synchronously at page load.
 
 ---
 
@@ -79,20 +78,21 @@ browser, with no proxy or middleman:
 - **`youtube.com/oembed`** — public metadata endpoint. Used after a
   cross-device sync (which carries only video IDs) to recover titles
   and channel names for hidden items and weekly-grid videos.
-- **`youtube.com/watch?v=<id>`** — fetched in the background when a
-  weekly-grid refresh is due or after a sync hydration, to extract
-  duration, view count, publish date, and the live-stream flag from
-  the page's HTML. The streaming-pass implementation reads only the
-  first ~256 KB and cancels.
+- **`youtube.com/watch?v=<id>`** — fetched in the background to fill in
+  duration, view count, publish date, and the live-stream flag for videos
+  that are missing them: after a cross-device sync hydration, after a
+  manual add via the Debug page, and on page init for any stub entries.
+  The streaming-pass implementation reads only the first ~256 KB and cancels.
 - **Channel page URLs** (e.g. `youtube.com/@channelname`) — fetched
   the same way to extract the channel avatar from the page's
   `og:image` tag.
 - **Thumbnail images on `i.ytimg.com`** — loaded as normal `<img>`
   tags when the weekly grid renders.
-- **Navigation to `youtube.com/`** — when a refresh is due, the
-  extension navigates the active tab to the real YouTube home, scrapes
-  recommendations from the rendered DOM, and navigates back to the
-  marker URL.
+- **A background request to `youtube.com/`** — when a refresh is due, the
+  extension's background script fetches the real YouTube home page (with
+  your logged-in cookies, same as a normal visit) and reads the
+  recommendations from the JSON the page already embeds. No tab is
+  navigated; nothing is sent anywhere.
 
 These are the same hosts your browser already talks to whenever you
 use YouTube. The extension does not contact any other server, and it
@@ -112,8 +112,8 @@ because there is no such server.
   precise location, payment data, or contact list.
 - **No tracking of your YouTube account.** It does not read your
   YouTube account, your subscriptions, your watch history, or your
-  recommendations beyond what the extension scrapes from the home grid
-  itself during a refresh.
+  recommendations beyond the home-page recommendations it reads during
+  a refresh.
 - **No sale or sharing of data with third parties.** There is no data
   to sell, and the project has no business relationships through which
   to share it.

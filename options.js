@@ -23,15 +23,7 @@
 //     offset, storage clear buttons.
 // =============================================================================
 
-function showStatus(message, isSuccess = true) {
-  const status = document.getElementById("status");
-  status.textContent = message;
-  status.className = `status show ${isSuccess ? "success" : "info"}`;
-
-  setTimeout(() => {
-    status.classList.remove("show");
-  }, 2000);
-}
+// showStatus lives in shared.js (shared with popup.js).
 
 const DAY_NAMES_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const DAY_NAMES_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -102,19 +94,27 @@ function getSelectedDailyLimitMode() {
 
 function applyDailyLimitModeUI() {
   const mode = getSelectedDailyLimitMode();
-  document.getElementById("max-videos-per-day-label").style.display =
-    mode === "time" ? "none" : "";
-  document.getElementById("max-time-per-day-label").style.display =
-    mode === "videos" ? "none" : "";
-  // The info text describes the time setting; hide it when only video count
-  // is being tracked.
-  document.getElementById("daily-limit-info").style.display =
-    mode === "videos" ? "none" : "";
+  // Each control is hidden when the selected mode makes it irrelevant. The
+  // info text describes the time setting, so it hides in videos-only mode.
+  const hideWhen = {
+    "max-videos-per-day-label": mode === "time",
+    "max-time-per-day-label": mode === "videos",
+    "daily-limit-info": mode === "videos"
+  };
+  for (const [id, hidden] of Object.entries(hideWhen)) {
+    document.getElementById(id).style.display = hidden ? "none" : "";
+  }
+}
+
+// Reads the daily-limit hours+minutes inputs, floored at 0.
+function readHourMinutePair() {
+  const h = Math.max(0, Number(document.getElementById("max-hours-per-day").value) || 0);
+  const m = Math.max(0, Number(document.getElementById("max-minutes-per-day").value) || 0);
+  return { h, m };
 }
 
 function updateDailyLimitInfo() {
-  const h = Math.max(0, Number(document.getElementById("max-hours-per-day").value) || 0);
-  const m = Math.max(0, Number(document.getElementById("max-minutes-per-day").value) || 0);
+  const { h, m } = readHourMinutePair();
   const info = document.getElementById("daily-limit-info");
   if (!info) return;
   const totalMin = h * 60 + m;
@@ -259,6 +259,11 @@ function updateInfoText() {
   }
 }
 
+// Timestamp of this tab's most recent settings write, used to ignore our own
+// storage.onChanged echo so a remote (synced) settings change reloads the form
+// but our own edits don't fight the user mid-typing.
+let lastLocalSettingsWriteTs = 0;
+
 async function autoSave() {
   const refreshDay = Number(document.getElementById("refresh-day").value);
   const refreshHour12 = Number(document.getElementById("refresh-hour").value);
@@ -293,6 +298,7 @@ async function autoSave() {
     maxVideosPerDay: Number(document.getElementById("max-videos-per-day").value),
     maxSecondsPerDay: computeMaxSecondsPerDayFromInputs()
   });
+  lastLocalSettingsWriteTs = Date.now();
 
   updateInfoText();
   updateDailyLimitInfo();
@@ -311,8 +317,7 @@ function formatHM(seconds) {
 }
 
 function computeMaxSecondsPerDayFromInputs() {
-  const h = Math.max(0, Number(document.getElementById("max-hours-per-day").value) || 0);
-  const m = Math.max(0, Number(document.getElementById("max-minutes-per-day").value) || 0);
+  const { h, m } = readHourMinutePair();
   const totalSeconds = (h * 60 + m) * 60;
   // Don't write 0 — sanitizeSettings would coerce back to the default. Floor
   // at 60 (1 minute) so an empty/zero state still has a sane limit.
@@ -430,7 +435,7 @@ document.getElementById("fake-now-apply-btn").addEventListener("click", async ()
     showStatus("Invalid date/time", false);
     return;
   }
-  const offset = target - Date.now();
+  const offset = sanitizeFakeNowOffset(target - Date.now());
   await chrome.storage.local.set({ [STORAGE_FAKE_NOW_OFFSET_KEY]: offset });
   await refreshFakeNowUI();
   showStatus(`Fake time set — refresh logic will treat now as ${formatHumanDateTime(target)}`);
@@ -663,17 +668,7 @@ async function backfillMissingHiddenVideoMetadata() {
   renderHiddenItems();
 }
 
-// Hidden channels are stored by their channelUrl. There's no oEmbed endpoint
-// for channels, but the URL itself almost always carries a @handle or UC id
-// that's a usable display label.
-function channelDisplayFromKey(key) {
-  if (!key) return null;
-  const handle = key.match(/@([^/?#&]+)/);
-  if (handle) return `@${handle[1]}`;
-  const ucId = key.match(/\/channel\/(UC[^/?#&]+)/i);
-  if (ucId) return ucId[1];
-  return null;
-}
+// channelDisplayFromKey lives in shared.js (shared with popup.js).
 
 async function renderHiddenItems() {
   const videosList = document.getElementById("hidden-videos-list");
@@ -800,6 +795,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (STORAGE_DAILY_STATE_KEY in changes || STORAGE_DAILY_GRACE_KEY in changes || SETTINGS_KEY in changes) {
     renderDailyStateReadout();
+  }
+  // A settings change that isn't this tab's own write echo means another
+  // device (via sync) or another tab updated settings — reload the form so a
+  // later autoSave doesn't push stale field values back over the remote change.
+  if (SETTINGS_KEY in changes && Date.now() - lastLocalSettingsWriteTs > 1500) {
+    loadSettings();
   }
   if (STORAGE_DAILY_STATE_KEY in changes) {
     // Watching started/cleared in another tab — re-evaluate lock state.

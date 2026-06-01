@@ -3,24 +3,15 @@
 //
 // Two top-level buttons:
 //   - Settings   : opens the full options page in a new tab.
-//   - Hidden Items : reveals the hidden-videos/channels list right in the
-//                    popup, with per-item Restore and a Restore All button.
+//   - Hidden Items : toggles a view of the hidden videos/channels list within
+//                    the popup, with per-item Restore and a Restore All button.
 //
 // Video metadata that came back from sync as bare IDs (post-reinstall case)
 // is rebuilt via YouTube's oEmbed endpoint and persisted to the metadata
 // map, so the popup keeps showing real titles after the refresh cycle.
 // =============================================================================
 
-function showStatus(message, isSuccess = true) {
-  const status = document.getElementById("status");
-  if (!status) return;
-  status.textContent = message;
-  status.className = `status show ${isSuccess ? "success" : "info"}`;
-
-  setTimeout(() => {
-    status.classList.remove("show");
-  }, 2000);
-}
+// showStatus lives in shared.js (shared with options.js).
 
 function showContent(contentId) {
   document.querySelectorAll(".content").forEach(el => {
@@ -91,14 +82,7 @@ async function backfillMissingHiddenVideoMetadata() {
   await loadHiddenItems();
 }
 
-function channelDisplayFromKey(key) {
-  if (!key) return null;
-  const handle = key.match(/@([^/?#&]+)/);
-  if (handle) return `@${handle[1]}`;
-  const ucId = key.match(/\/channel\/(UC[^/?#&]+)/i);
-  if (ucId) return ucId[1];
-  return null;
-}
+// channelDisplayFromKey lives in shared.js (shared with options.js).
 
 async function loadHiddenItems() {
   const hiddenData = await getHiddenItemsWithMetadata();

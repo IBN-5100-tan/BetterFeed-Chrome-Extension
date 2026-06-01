@@ -42,7 +42,8 @@ The **Settings → Debug** page is the maintainer's toolkit:
 
 - **Daily state readout.** Shows the day key, videos watched, time
   watched, and current grace. Auto-refreshes on storage changes.
-- **Manual refresh.** Forces the next page load to scrape a fresh grid.
+- **Manual refresh.** Forces the background to fetch a fresh grid on the
+  next refresh check.
 - **Force-add video.** Paste an 11-char video ID or any of: `youtu.be/ID`,
   `youtube.com/watch?v=ID`, `youtube.com/shorts/ID`, `youtube.com/embed/ID`.
   The extension prepends a stub to the weekly grid and `rebuildVideoMetadataIfNeeded()`
@@ -100,7 +101,7 @@ background.js    Service worker (dNR redirect rule, refresh-due alarm).
 early.js         Runs at document_start, applies <html> classes.
 preload.css      Hides native YouTube shell before paint.
 shared.js        Storage / settings / sync / getNow(). Loaded by everything.
-content.js       Everything users see on a YouTube tab. ~6700 lines.
+content.js       Everything users see on a YouTube tab. ~3800 lines.
 options.html/js  Full-tab settings page.
 popup.html/js    Toolbar popup.
 welcome.html/js  Post-install hero page.
@@ -139,7 +140,7 @@ the surface:
 1. **Fresh install.** Wipe local + sync, reload, walk through the cold-start
    flow, pick a mode, watch the first grid populate.
 2. **Refresh schedule.** In Debug, set fake time past `refreshAfter`,
-   reload a YouTube tab, confirm a new grid scrapes successfully.
+   reload a YouTube tab, confirm a new grid loads successfully.
 3. **Mode picker.** Open a fresh YouTube tab, confirm the picker appears;
    pick each mode and confirm the UI matches.
 4. **Work session.** Start a 20-minute session, attempt to switch back to
@@ -193,6 +194,57 @@ guard in case anyone ever does generate one locally.
 
 ---
 
+## Publishing to Firefox Add-ons (AMO)
+
+> Maintainers only. Targets Firefox 121 and newer.
+
+### The `browser_specific_settings.gecko.id` field
+
+The `id` under `browser_specific_settings.gecko` in `manifest.json` is to
+Firefox what the `key` field is to Chrome: it pins the extension's
+identity across builds so sync data follows the user. **Do not change
+it after the first AMO submission** — Mozilla treats a changed `id` as
+a different extension and you'd lose the listing and every user's
+synced data.
+
+The current value is a placeholder tied to the GitHub project; pick a
+final value before the first submission if you want it to look more
+official.
+
+### Packaging
+
+The same zip that ships to the Chrome Web Store works for AMO — Firefox
+121+ accepts the MV3 manifest with `service_worker` background.
+
+1. Bump `version` in `manifest.json`. AMO requires the version to be
+   strictly greater than the previous one (same as Chrome).
+2. Build the zip the same way as for Chrome (see above).
+3. Upload at [addons.mozilla.org/developers/](https://addons.mozilla.org/developers/).
+4. Choose **"On this site"** if you want AMO to host downloads, or
+   **"On your own"** if you want to self-distribute the signed `.xpi`.
+5. Submit for review. Mozilla signs the upload after acceptance.
+
+### Self-distribution caveat
+
+Firefox Release requires every installed extension to be signed by
+Mozilla. You cannot side-load an unsigned `.xpi`. For development,
+`about:debugging` → "Load Temporary Add-on" works without signing but
+the add-on is unloaded on browser restart. For permanent self-hosted
+installs (no AMO listing) you still upload to AMO, just with the
+"On your own" distribution option — Mozilla signs the file and returns
+it for you to distribute.
+
+### Cross-browser sync is separate
+
+`chrome.storage.sync` writes to whichever sync infrastructure the user's
+browser uses — Chrome Sync for Chrome, Firefox Sync for Firefox. A user
+who installs BetterFeed in both browsers will have **two independent
+sync chains**. This is a platform limitation, not something the
+extension can bridge. Mention it on the AMO listing description so users
+aren't surprised.
+
+---
+
 ## Filing issues
 
 Useful info to include:
@@ -205,11 +257,14 @@ Useful info to include:
 - Console output from the relevant DevTools context (content script /
   service worker / options page).
 
-For YouTube-DOM-related bugs (something stopped hiding, a scrape is
-returning zero videos), YouTube redesigns are the most common cause —
-include a screenshot of the broken element with DevTools open to its
-selectors so the fix is just an update to the selector list at the top
-of `content.js`.
+For YouTube-redesign bugs, there are two failure modes. (1) Something
+stopped hiding (Shorts, comments, etc.) — a CSS/selector change; include a
+screenshot with DevTools open to the broken element so the fix is a selector
+update. (2) The refresh returns zero videos — YouTube changed the
+`ytInitialData` JSON shape; the fix is in `parseLockupViewModel` /
+`extractVideosFromYouTubeHomeHtml` in `shared.js`. Include the output of
+`await chrome.storage.local.get("betterFeedRefreshStatus")` and, if you can,
+a sample of `ytInitialData` from `youtube.com`.
 
 ---
 

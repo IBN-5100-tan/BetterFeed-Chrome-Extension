@@ -51,17 +51,20 @@ which the weekly grid is drawn.
 
 The redirect rule turns off when the extension is disabled
 (`settings.enabled = false`). In Watch mode it also turns off when
-`settings.weeklyHomeEnabled` is off, `settings.redirectHomeEnabled` is
-off, or a refresh is due (we *want* to land on the real home so we can
-scrape it).
+`settings.weeklyHomeEnabled` or `settings.redirectHomeEnabled` is off.
+It is intentionally **decoupled from refresh-due state** — the background
+refreshes the grid in place (a plain HTTP fetch, no navigation), so
+`youtube.com/` should always land on the marker URL and never flash the
+native home just because a refresh is pending.
 
 In Work / Listen mode the rule stays on and redirects to a different
 marker hash (`#better-feed-work` / `#better-feed-listen`); content.js
 renders the Work placeholder on that page instead of the weekly grid.
 
-The rule is re-evaluated on every settings / mode / refresh-after /
-video-list / fake-time storage change, plus once every 5 minutes via a
-`chrome.alarms` heartbeat.
+The rule is re-evaluated on every settings / mode / fake-time storage
+change, plus once every 5 minutes via a `chrome.alarms` heartbeat.
+(Video-list / refresh-after changes no longer recompute the rule, since
+it no longer depends on refresh-due state.)
 
 ---
 
@@ -82,35 +85,48 @@ Manifest V3. Lists:
 - The `key` field locks the extension ID so unpacked development and Web Store
   installs share the same ID. See [CONTRIBUTING.md](CONTRIBUTING.md#publishing-to-the-chrome-web-store).
 
-### `background.js` — service worker
+### `background.js` — service worker (Chrome) / event page (Firefox)
 
-Idle until something wakes it. Lifecycle and message handlers:
+Idle until something wakes it. It **owns the entire weekly refresh** and
+keeps the redirect rule in sync:
 
-1. `updateRedirectRule()` reads `settings`, `mode`, `refreshAfter`,
-   `hasVideos`, decides whether the redirect rule should be installed, then
-   calls `declarativeNetRequest.updateDynamicRules`. It calls
-   `loadFakeNowOffset()` first so `getNow()` returns the right value.
-2. On `onInstalled` with `reason === "install"`: clear mode (so the user
-   picks again), migrate legacy storage keys, hydrate from sync, install
-   the redirect rule, open the welcome tab. For other install reasons
-   (update / reload from disk) the mode is preserved.
-3. On `onStartup`: clear mode, migrate legacy keys, hydrate from sync,
-   install the redirect rule.
-4. On `chrome.storage.onChanged` (local): re-run `updateRedirectRule()`
-   when settings, `refreshAfter`, videos, mode, or fake-time change. On
-   sync changes, route through `applySyncChangeToLocal()`.
-5. Every 5 minutes (`chrome.alarms` named `better-feed-refresh-check`):
-   re-run `updateRedirectRule()`.
-6. On `chrome.runtime.onMessage` of type `"better-feed-prepare-scrape"`:
-   temporarily remove the redirect rule so content.js can navigate the tab
-   to the real `youtube.com/` and scrape. The rule is reinstalled when
-   content.js writes the freshly scraped grid back to
-   `STORAGE_VIDEOS_KEY`, which fires the storage listener above.
-7. On `chrome.tabs.onRemoved` / `onUpdated`: if no YouTube tabs remain,
-   clear the mode so the next visit re-prompts the picker.
+1. `ensureFreshVideos(reason)` → `runRefresh()` is the whole refresh: when
+   Watch mode (or no mode yet) + extension + weekly home are enabled and a
+   refresh is due, it `fetch()`es `https://www.youtube.com/` directly,
+   parses the embedded `ytInitialData` (`extractVideosFromYouTubeHomeHtml`),
+   filters hidden / live, picks the grid (`chooseWeeklyVideos`), and saves
+   via `saveWeeklyVideosToStorage` (which also advances `refreshAfter` and
+   ships IDs to sync). No tab navigation, no DOM scraping. A single-flight
+   guard (an in-memory promise plus a persisted `STORAGE_REFRESH_STATUS_KEY`
+   of `{state:"idle"|"refreshing"|"error"}`) prevents double-fetching across
+   wake-ups and tabs. On failure it does **not** advance `refreshAfter`, so
+   the next trigger retries. The dNR rule is main_frame-scoped, so this
+   `fetch` (an `xmlhttprequest`) is never redirected — no rule juggling.
+2. `updateRedirectRule()` reads `settings` + `mode`, decides whether the
+   redirect rule should be installed, then calls
+   `declarativeNetRequest.updateDynamicRules`. Decoupled from refresh-due.
+3. On `onInstalled` with `reason === "install"`: clear mode, migrate legacy
+   keys, hydrate from sync, install the rule, `ensureFreshVideos`, open the
+   welcome tab. Other install reasons preserve the mode.
+4. On `onStartup`: clear mode, migrate, hydrate from sync, install the rule,
+   `ensureFreshVideos`. (Hydrate completes first so the due-check sees the
+   synced `refreshAfter`.)
+5. On `chrome.storage.onChanged` (local): recompute the rule on settings /
+   mode / fake-time changes; call `ensureFreshVideos` on settings /
+   `refreshAfter` / videos / mode / fake-time changes. The status key is
+   excluded from both (it's the refresh's own output — would loop). Sync
+   changes route through `applySyncChangeToLocal()`.
+6. Every 5 minutes (`chrome.alarms` `better-feed-refresh-check`): recompute
+   the rule and `ensureFreshVideos` (flips a stale "due" into a refresh).
+7. On `chrome.runtime.onMessage` of type `"better-feed-ensure-fresh"`: a
+   fire-and-forget nudge from content (used when the event page was asleep
+   at cold start). Idempotent via the single-flight lock + due-check.
+8. On `chrome.tabs.onRemoved` / `onUpdated`: if no YouTube tabs remain,
+   clear the mode so the next visit re-prompts the picker (with a short
+   double-check to tolerate Firefox's transient zero-tab query).
 
-The service worker holds no in-memory state across wake-ups — everything
-re-reads from `chrome.storage`.
+The worker holds no in-memory state across wake-ups except the in-flight
+refresh lock — everything else re-reads from `chrome.storage`.
 
 ### `early.js` + `preload.css`
 
@@ -178,7 +194,7 @@ Key responsibilities:
 
 ### `content.js`
 
-The behavior file. ~6700 lines, organized into the labeled sections you'll
+The behavior file. ~3800 lines, organized into the labeled sections you'll
 see if you grep for `/* ---------- ... ---------- */`. The top-of-file
 header lists every section and what it owns.
 
@@ -201,7 +217,10 @@ completion, all roads lead to `update()`, which calls
 4. If settings are disabled or `weeklyHomeEnabled` is off, strip our UI.
 5. If the daily limit is hit and no grace is active, render
    `renderSeeYouTomorrow()`.
-6. Otherwise, `getOrCreateWeeklyVideos()` → `renderCustomHome()`.
+6. Otherwise, `renderFromStorage()` reads the stored grid + the background's
+   refresh status and paints the grid, the "Refreshing…" loader, or a quiet
+   retry message — a pure read, no fetching/saving (see the refresh pipeline
+   below).
 
 `onNonHomePage()` runs on `/watch`, `/results`, channel pages, etc. It
 doesn't replace anything — it just removes our injected style/grid (if
@@ -235,55 +254,60 @@ in the install handler. Two CTAs: open settings, or jump to YouTube.
 
 ## The refresh pipeline
 
-Refresh is the trickiest path in the codebase. Here's the sequence when a
-refresh is due:
+The refresh is **owned entirely by the background** (`background.js`). It
+never navigates a tab and never touches the DOM — it fetches YouTube's home
+HTML directly and parses the JSON the page already embeds. content.js is a
+pure renderer that reacts to what the background stores.
 
-1. **Detection.** `getOrCreateWeeklyVideos()` checks
-   `now >= stored.refreshAfter || !hasStoredVideos`. If false, the stored
-   grid is used as-is.
+1. **Trigger.** `ensureFreshVideos(reason)` runs on: the 5-minute alarm,
+   `onInstalled` / `onStartup` (after `hydrateFromSync`), qualifying local
+   `storage.onChanged` events (settings / `refreshAfter` / videos / mode /
+   fake-time), and a fire-and-forget `"better-feed-ensure-fresh"` nudge that
+   content sends when it has no grid (covers the cold-start / event-page-asleep
+   case). All of these are in-process reactions to top-level background
+   listeners — no cross-context message sits on the critical path.
 
-2. **Bouncing off the marker.** If the user is on the marker URL (which is
-   almost always the case), we need to navigate to the *real* home page
-   to scrape. The marker page can't scrape itself — the redirect rule
-   would just keep bouncing it. So content.js:
-   - Sets `sessionStorage[REFRESH_RETURN_FLAG] = "1"` (the key string is
-     `"better-feed-refresh-return"`).
-   - Sends `{type: "better-feed-prepare-scrape"}` to the service worker.
-   - The service worker drops the redirect rule and replies `{ok: true}`.
-   - content.js sets `window.location.href = "https://www.youtube.com/"`.
+2. **Guard + due-check (`runRefresh`).** Returns immediately unless Watch mode
+   (or no mode yet) + `enabled` + `weeklyHomeEnabled`, and `isRefreshDue`. A
+   single-flight guard — an in-memory `refreshInFlight` promise plus a
+   persisted `STORAGE_REFRESH_STATUS_KEY` (`{state:"refreshing", startedAt}`
+   honored for `REFRESH_INFLIGHT_TTL_MS`) — prevents two wakes or two tabs
+   from double-fetching.
 
-3. **Scraping.** With the redirect rule gone, the navigation lands on the
-   real home page. The same content.js loads again, sees the
-   `REFRESH_RETURN_FLAG` entry in sessionStorage, renders the "Refreshing..."
-   loading screen, then:
-   - `waitForVideoLinks(targetCount)` waits for YouTube's grid to populate.
-   - `scrapeRecommendations(limit, { excludeLive })` snapshots up to
-     `limit` candidate videos, filtering out sponsored items, mix /
-     radio playlists, and live broadcasts (when `excludeLive` is set
-     from `settings.excludeLiveVideos`) at scrape time.
-   - `filterHiddenVideos()` strips anything the user has hidden.
-   - `chooseWeeklyVideos()` dedups, prefers entries with full metadata,
-     and slices to the target count.
+3. **Fetch + parse.** `fetchYouTubeHomeHtml()` is a plain
+   `fetch("https://www.youtube.com/", {credentials:"include"})`. The dNR
+   redirect rule is `main_frame`-scoped, so it does **not** match this fetch
+   (an `xmlhttprequest`) — no rule drop/restore needed.
+   `extractVideosFromYouTubeHomeHtml()` (shared.js) walks the embedded
+   `ytInitialData`, pulling each `lockupViewModel` into a complete video
+   record (title, channel, avatar, duration, views, publish date, live flag).
+   No enrichment step — the parser already returns full objects.
 
-4. **Enrichment.** `enrichVideosFast()` fires per-video lookups against
-   the watch page and channel page (with `FETCH_TIMEOUT_MS = 1800`) to fill
-   in duration, view count, publish date, and the channel avatar.
+4. **Filter + pick + save.** `filterHiddenVideos()` strips hidden items;
+   live broadcasts are dropped when `settings.excludeLiveVideos`;
+   `chooseWeeklyVideos()` dedups, prefers fully-populated entries, and slices
+   to `videoCount + REFRESH_BACKFILL_BUFFER` (capped at `MAX_WEEKLY_VIDEOS`).
+   `saveWeeklyVideosToStorage(chosen, getNextRefreshTime(settings))` writes
+   `STORAGE_VIDEOS_KEY` + `STORAGE_REFRESH_AFTER_KEY` and mirrors a slim
+   ID-only version to sync.
 
-5. **Save + return.** `saveWeeklyVideos(videosToSave, nextRefreshAfter)`
-   writes the result to local storage (which mirrors a slim ID-only version
-   to sync). Then content.js:
-   - Clears `REFRESH_RETURN_FLAG`.
-   - Navigates back to the marker URL.
-   - The service worker re-installs the redirect rule on the next storage
-     change (`STORAGE_VIDEOS_KEY` changed).
+5. **Status + render.** On success the status flips to `{state:"idle"}`; on
+   failure to `{state:"error"}` **without advancing `refreshAfter`** (so the
+   next alarm retries). The `STORAGE_VIDEOS_KEY` / status writes fire
+   `storage.onChanged` in every live tab — content's listener calls `update()`
+   → `renderFromStorage()`, which swaps the loader for the freshly-stored
+   grid. That `storage.onChanged` is the **only** render-notification channel;
+   there are no retry timers or focus hooks.
 
-6. **Render.** On the marker page reload, `update()` runs again, sees the
-   freshly-stored grid, and renders it.
+`REFRESH_BACKFILL_BUFFER = 5` is a small over-scrape so that render-time
+filtering of a late-detected live stream ("Streamed N ago") doesn't shrink the
+visible grid below the target.
 
-`REFRESH_BACKFILL_BUFFER = 5` is a small over-scrape — the watch-page
-enrichment sometimes flags a video as live ("Streamed N ago") that the
-home-grid scrape didn't catch, and we'd rather drop a few than show a
-short grid.
+> Historical note: refresh used to work by redirect-bouncing the tab to vanilla
+> `youtube.com`, DOM-scraping the rendered grid, and bouncing back — wrapped in
+> cooldowns, retry timers, and sessionStorage flags. That was replaced by the
+> background HTTP-fetch design above; the JSON the server embeds is far more
+> stable than the rendered DOM, and there's no navigation to race.
 
 ---
 
@@ -549,8 +573,7 @@ When the extension is installed on a device that's never synced:
 
 1. The init IIFE in `content.js` calls `detectColdStart()`, which returns
    true when *both* `SETTINGS_KEY` and `STORAGE_VIDEOS_KEY` are missing
-   from local storage. The refresh-return path is excluded so a mid-scrape
-   reload doesn't accidentally re-enter cold start.
+   from local storage.
 2. `renderColdStartSetup()` asks whether to wait for sync or start fresh.
 3. If "wait for sync," `COLD_START_TIMEOUT_MS = 5000` ms is the budget.
    If sync arrives, the weekly grid populates immediately. If it doesn't,

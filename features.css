@@ -44,7 +44,8 @@ html.better-feed-hide-watch-recs ytd-watch-next-secondary-results-renderer {
 }
 
 html.better-feed-hide-watch-recs ytd-watch-flexy:not(:has(ytd-live-chat-frame)) #secondary.ytd-watch-flexy,
-html.better-feed-hide-watch-recs.better-feed-hide-live-chat #secondary.ytd-watch-flexy {
+html.better-feed-hide-watch-recs.better-feed-hide-live-chat #secondary.ytd-watch-flexy,
+html.better-feed-hide-watch-recs.better-feed-hide-watch-side-panel #secondary.ytd-watch-flexy {
   display: none !important;
 }
 
@@ -193,13 +194,13 @@ html.better-feed-light-mode #better-feed-daily-popup .better-feed-daily-popup-ca
   font-size: 14px;
   font-weight: 500;
   font-family: inherit;
-  background: #3ea6ff;
+  background: var(--better-feed-primary-action);
   color: #fff;
   transition: background 0.15s;
 }
 
 #better-feed-daily-popup button:hover {
-  background: #2d88cc;
+  background: var(--better-feed-primary-action-hover);
 }
 
 #better-feed-daily-popup button.secondary {
@@ -279,12 +280,12 @@ html.better-feed-light-mode #better-feed-channel-confirm .better-feed-channel-co
 }
 
 #better-feed-channel-confirm button.primary {
-  background: #3ea6ff;
+  background: var(--better-feed-primary-action);
   color: #fff;
 }
 
 #better-feed-channel-confirm button.primary:hover {
-  background: #2d88cc;
+  background: var(--better-feed-primary-action-hover);
 }
 
 #better-feed-channel-confirm button.secondary {
@@ -389,7 +390,7 @@ html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card {
 }
 
 #better-feed-mode-picker .better-feed-mode-card:hover {
-  border-color: #3ea6ff;
+  border-color: var(--better-feed-primary-action);
   background: #232323;
 }
 
@@ -466,7 +467,7 @@ html.better-feed-light-mode #better-feed-mode-picker .better-feed-custom-session
 }
 #better-feed-mode-picker .better-feed-custom-session-start {
   padding: 10px 18px;
-  background: #3ea6ff;
+  background: var(--better-feed-primary-action);
   color: #fff;
   border: none;
   border-radius: 8px;
@@ -476,7 +477,7 @@ html.better-feed-light-mode #better-feed-mode-picker .better-feed-custom-session
   cursor: pointer;
 }
 #better-feed-mode-picker .better-feed-custom-session-start:hover {
-  background: #2d88cc;
+  background: var(--better-feed-primary-action-hover);
 }
 #better-feed-mode-picker .better-feed-custom-session-min-note,
 #better-feed-session-length-picker .better-feed-custom-session-min-note {
@@ -709,7 +710,7 @@ html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clo
   border-color: rgba(0, 0, 0, 0.1);
 }
 #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card:hover {
-  border-color: #3ea6ff;
+  border-color: var(--better-feed-primary-action);
   background: rgba(255, 255, 255, 0.08);
 }
 html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card:hover {
@@ -763,7 +764,7 @@ html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clo
 }
 #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-start {
   padding: 6px 10px;
-  background: #3ea6ff;
+  background: var(--better-feed-primary-action);
   color: #fff;
   border: none;
   border-radius: 4px;
@@ -773,7 +774,7 @@ html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clo
   cursor: pointer;
 }
 #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-start:hover {
-  background: #2d88cc;
+  background: var(--better-feed-primary-action-hover);
 }
 #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-custom-session-min-note {
   font-size: 10px;
@@ -881,10 +882,10 @@ html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-ca
 #better-feed-work-unlock .better-feed-work-unlock-cancel:hover { background: #4a4a4a; }
 html.better-feed-light-mode #better-feed-work-unlock .better-feed-work-unlock-cancel:hover { background: #d4d4d4; }
 #better-feed-work-unlock .better-feed-work-unlock-confirm {
-  background: #3ea6ff;
+  background: var(--better-feed-primary-action);
   color: #fff;
 }
-#better-feed-work-unlock .better-feed-work-unlock-confirm:hover:not(:disabled) { background: #2d88cc; }
+#better-feed-work-unlock .better-feed-work-unlock-confirm:hover:not(:disabled) { background: var(--better-feed-primary-action-hover); }
 #better-feed-work-unlock .better-feed-work-unlock-confirm:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -942,7 +943,7 @@ html.better-feed-light-mode #better-feed-session-length-picker .better-feed-mode
   border-color: rgba(0, 0, 0, 0.12);
 }
 #better-feed-session-length-picker .better-feed-mode-card:hover {
-  border-color: #3ea6ff;
+  border-color: var(--better-feed-primary-action);
   background: rgba(255, 255, 255, 0.04);
 }
 html.better-feed-light-mode #better-feed-session-length-picker .better-feed-mode-card:hover {
@@ -997,7 +998,7 @@ html.better-feed-light-mode #better-feed-session-length-picker .better-feed-cust
 }
 #better-feed-session-length-picker .better-feed-custom-session-start {
   padding: 10px 18px;
-  background: #3ea6ff;
+  background: var(--better-feed-primary-action);
   color: #fff;
   border: none;
   border-radius: 8px;
@@ -1007,7 +1008,7 @@ html.better-feed-light-mode #better-feed-session-length-picker .better-feed-cust
   cursor: pointer;
 }
 #better-feed-session-length-picker .better-feed-custom-session-start:hover {
-  background: #2d88cc;
+  background: var(--better-feed-primary-action-hover);
 }
 
 #better-feed-session-ended-popup {
@@ -1072,10 +1073,10 @@ html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-sessio
 #better-feed-session-ended-popup .better-feed-session-ended-no:hover { background: #4a4a4a; }
 html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-session-ended-no:hover { background: #d4d4d4; }
 #better-feed-session-ended-popup .better-feed-session-ended-yes {
-  background: #3ea6ff;
+  background: var(--better-feed-primary-action);
   color: #fff;
 }
-#better-feed-session-ended-popup .better-feed-session-ended-yes:hover { background: #2d88cc; }
+#better-feed-session-ended-popup .better-feed-session-ended-yes:hover { background: var(--better-feed-primary-action-hover); }
 
 #better-feed-mode-switcher {
   display: inline-flex;
@@ -1100,7 +1101,7 @@ html.better-feed-light-mode #better-feed-session-ended-popup .better-feed-sessio
 
 #better-feed-mode-switcher:hover {
   background: rgba(255, 255, 255, 0.14);
-  border-color: #3ea6ff;
+  border-color: var(--better-feed-primary-action);
 }
 
 html.better-feed-light-mode #better-feed-mode-switcher {
@@ -1111,14 +1112,14 @@ html.better-feed-light-mode #better-feed-mode-switcher {
 
 html.better-feed-light-mode #better-feed-mode-switcher:hover {
   background: rgba(0, 0, 0, 0.08);
-  border-color: #3ea6ff;
+  border-color: var(--better-feed-primary-action);
 }
 
 #better-feed-mode-switcher .better-feed-mode-switcher-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #3ea6ff;
+  background: var(--better-feed-primary-action);
   flex-shrink: 0;
 }
 

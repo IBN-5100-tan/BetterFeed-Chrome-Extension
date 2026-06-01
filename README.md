@@ -46,17 +46,33 @@ Below is the actual README, now that I have gotten my schpiel out of the way.
 
 ## Install
 
-### From source (beta development)
+### From source — Chrome / Brave / Edge / any Chromium browser
 
 1. Clone or [download](https://github.com/IBN-5100-tan/BetterFeed-Chrome-Extension/archive/refs/heads/main.zip) this repo.
-2. Open `chrome://extensions` in Chrome / Brave / Edge / any Chromium browser.
+2. Open `chrome://extensions`.
 3. Toggle **Developer mode** on (top right).
 4. Click **Load unpacked** and choose the folder **BetterFeed-Chrome-Extension-main**.
 5. The welcome page should open where you can configure settings and head to `youtube.com`.
 
-### From the Chrome Web Store
+### From source — Firefox (121 or newer)
 
-> Not yet published. See [CONTRIBUTING.md](CONTRIBUTING.md#publishing-to-the-chrome-web-store)
+1. Clone or [download](https://github.com/IBN-5100-tan/BetterFeed-Chrome-Extension/archive/refs/heads/main.zip) this repo.
+2. Open `about:debugging#/runtime/this-firefox`.
+3. Click **Load Temporary Add-on…** and select the `manifest.json` file inside **BetterFeed-Chrome-Extension-main**.
+4. Visit `youtube.com`.
+
+Temporary add-ons are unloaded when you restart Firefox; reload with the
+same dialog. A signed release on addons.mozilla.org (AMO) is planned.
+
+> **Note on cross-browser sync.** Chrome's `chrome.storage.sync` and Firefox's
+> are separate ecosystems — settings, weekly grid, and hidden items do not
+> sync between, say, Chrome on your laptop and Firefox on your phone. Within
+> a single browser family (e.g., Chrome on two laptops, or Firefox on two
+> laptops), sync works the same way.
+
+### From the Chrome Web Store / Firefox Add-ons
+
+> Not yet published on either. See [CONTRIBUTING.md](CONTRIBUTING.md#publishing-to-the-chrome-web-store)
 > for the publish flow used by maintainers.
 
 ---
@@ -83,10 +99,12 @@ Configured under **Settings → Refresh**:
 - **Multiple days per week.** Refreshes on any combination of days per week.
 - **Daily.** Refreshes once a day.
 
-On a refresh, the extension navigates the active YouTube tab to the vanilla
-home page in the background, gets a fresh set of recommendations, and
-returns to the custom URL (`youtube.com/feed/library#better-feed-watch`) with the new home page stored. 
-Until the next refresh, you will always be redirected to and stay on the custom URL, and **NOT** `youtube.com` so YouTube's algorithm doesn't get messed up.
+On a refresh, the extension fetches YouTube's home page in the background (a
+plain HTTP request, no tab navigation), reads a fresh set of recommendations
+from it, and stores them as your new home page. Until the next refresh you are
+always redirected to and stay on the custom URL
+(`youtube.com/feed/library#better-feed-watch`), **NOT** `youtube.com`, so
+YouTube's algorithm doesn't get messed up.
 
 ### Daily limit
 

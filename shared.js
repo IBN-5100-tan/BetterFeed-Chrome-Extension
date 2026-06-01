@@ -31,6 +31,11 @@ const STORAGE_DAILY_STATE_KEY = "betterFeedDailyState";
 const STORAGE_DAILY_GRACE_KEY = "betterFeedDailyGrace";
 const STORAGE_MODE_KEY = "betterFeedSessionMode";
 const STORAGE_FAKE_NOW_OFFSET_KEY = "betterFeedFakeNowOffset";
+// Background-owned refresh status. Value: { state: "idle"|"refreshing"|"error",
+// startedAt?, failedAt?, reason? }. The content script reads it to decide
+// between the grid, the "Refreshing…" loader, and a quiet retry message —
+// it is NEVER synced (transient, per-device) and must stay out of SYNC_KEYS.
+const STORAGE_REFRESH_STATUS_KEY = "betterFeedRefreshStatus";
 const MODE_LOCALSTORAGE_KEY = "betterFeedMode";
 
 // One-shot rebrand migration: the chrome.storage keys and the localStorage
@@ -108,6 +113,20 @@ async function migrateLegacyStorageKeys() {
 
 let _fakeNowOffsetMs = 0;
 
+// Debug fake-time can shift the clock at most ±1 year. Without a bound a
+// corrupted / hostile stored offset (or a console mistake) could push
+// getNow() past the valid Date range, making new Date(getNow()) "Invalid"
+// and poisoning getDailyDayKey (→ "NaN-NaN-NaN") and the refresh schedule.
+const MAX_FAKE_NOW_OFFSET_MS = 365 * 24 * 60 * 60 * 1000;
+
+function sanitizeFakeNowOffset(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  if (n > MAX_FAKE_NOW_OFFSET_MS) return MAX_FAKE_NOW_OFFSET_MS;
+  if (n < -MAX_FAKE_NOW_OFFSET_MS) return -MAX_FAKE_NOW_OFFSET_MS;
+  return n;
+}
+
 function getNow() {
   return Date.now() + _fakeNowOffsetMs;
 }
@@ -115,8 +134,7 @@ function getNow() {
 async function loadFakeNowOffset() {
   try {
     const data = await chrome.storage.local.get([STORAGE_FAKE_NOW_OFFSET_KEY]);
-    const value = Number(data[STORAGE_FAKE_NOW_OFFSET_KEY]);
-    _fakeNowOffsetMs = Number.isFinite(value) ? value : 0;
+    _fakeNowOffsetMs = sanitizeFakeNowOffset(data[STORAGE_FAKE_NOW_OFFSET_KEY]);
   } catch (_) {
     _fakeNowOffsetMs = 0;
   }
@@ -125,8 +143,7 @@ async function loadFakeNowOffset() {
 
 function applyFakeNowOffsetChange(changes) {
   if (!changes || !(STORAGE_FAKE_NOW_OFFSET_KEY in changes)) return;
-  const value = Number(changes[STORAGE_FAKE_NOW_OFFSET_KEY].newValue);
-  _fakeNowOffsetMs = Number.isFinite(value) ? value : 0;
+  _fakeNowOffsetMs = sanitizeFakeNowOffset(changes[STORAGE_FAKE_NOW_OFFSET_KEY].newValue);
 }
 
 const MODE_WATCH = "watch";
@@ -186,6 +203,12 @@ async function clearCurrentMode() {
 }
 
 const MAX_WEEKLY_VIDEOS = 25;
+// Extra videos saved beyond settings.videoCount so render-time filtering of
+// late-detected live streams doesn't shrink the visible grid below target.
+const REFRESH_BACKFILL_BUFFER = 5;
+// How long a background refresh may hold the "refreshing" status before a new
+// trigger is allowed to supersede it (guards against a wedged in-flight fetch).
+const REFRESH_INFLIGHT_TTL_MS = 60_000;
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -253,8 +276,9 @@ function expandChannelKey(key) {
 }
 
 function isQuotaError(err) {
+  if (err?.name === "QuotaExceededError") return true;
   const msg = String(err?.message || err || "");
-  return /quota|QUOTA/i.test(msg);
+  return /quota|MAX_(WRITE|ITEMS|SUSTAINED)/i.test(msg);
 }
 
 async function safeSyncSet(items) {
@@ -280,7 +304,12 @@ async function safeSyncRemove(keys) {
 
 async function priorityWriteSync(items, priority) {
   if (await safeSyncSet(items)) return true;
+  // Defensive: evicting a key that the payload is about to re-write does
+  // nothing for the quota — the same bytes go right back. Drop any
+  // evict-list entry that overlaps the payload before we waste a round-trip.
+  const payloadKeys = new Set(Object.keys(items));
   for (const key of priority.evictKeysInOrder) {
+    if (payloadKeys.has(key)) continue;
     await safeSyncRemove([key]);
     if (await safeSyncSet(items)) return true;
   }
@@ -339,14 +368,25 @@ function mergeHiddenIds(localIds, syncIds) {
   return result;
 }
 
+// Validate a bounded integer setting: returns the value if it's an integer in
+// [min, max], else the fallback. Collapses the repeated bounds checks below.
+function clampInteger(value, min, max, fallback) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= min && n <= max ? n : fallback;
+}
+
 function sanitizeSettings(settings) {
-  const refreshDay = Number(settings?.refreshDay);
-  const refreshHour = Number(settings?.refreshHour);
-  const videoCount = Number(settings?.videoCount);
   const updatedAt = Number(settings?._updatedAt);
 
+  // Clamp _updatedAt: a far-future value (clock-skewed device) would win every
+  // last-writer-wins comparison forever and lock out legitimate sync updates.
+  // Anything beyond ~1 day ahead of this device's clock is treated as "now".
+  const maxUpdatedAt = getNow() + 24 * 60 * 60 * 1000;
+  const safeUpdatedAt =
+    Number.isFinite(updatedAt) && updatedAt > 0 ? Math.min(updatedAt, maxUpdatedAt) : 0;
+
   return {
-    _updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0,
+    _updatedAt: safeUpdatedAt,
     enabled:
       typeof settings?.enabled === "boolean"
         ? settings.enabled
@@ -365,10 +405,7 @@ function sanitizeSettings(settings) {
       settings?.refreshMode === "weekly"
         ? settings.refreshMode
         : DEFAULT_SETTINGS.refreshMode,
-    refreshDay:
-      Number.isInteger(refreshDay) && refreshDay >= 0 && refreshDay <= 6
-        ? refreshDay
-        : DEFAULT_SETTINGS.refreshDay,
+    refreshDay: clampInteger(settings?.refreshDay, 0, 6, DEFAULT_SETTINGS.refreshDay),
     refreshDays: Array.isArray(settings?.refreshDays)
       ? [
           ...new Set(
@@ -378,14 +415,11 @@ function sanitizeSettings(settings) {
           )
         ].sort((a, b) => a - b)
       : [...DEFAULT_SETTINGS.refreshDays],
-    refreshHour:
-      Number.isInteger(refreshHour) && refreshHour >= 0 && refreshHour <= 23
-        ? refreshHour
-        : DEFAULT_SETTINGS.refreshHour,
-    videoCount:
-      Number.isInteger(videoCount) && videoCount >= 1 && videoCount <= MAX_WEEKLY_VIDEOS
-        ? videoCount
-        : Math.min(DEFAULT_SETTINGS.videoCount, MAX_WEEKLY_VIDEOS),
+    refreshHour: clampInteger(settings?.refreshHour, 0, 23, DEFAULT_SETTINGS.refreshHour),
+    videoCount: clampInteger(
+      settings?.videoCount, 1, MAX_WEEKLY_VIDEOS,
+      Math.min(DEFAULT_SETTINGS.videoCount, MAX_WEEKLY_VIDEOS)
+    ),
     excludeLiveVideos:
       typeof settings?.excludeLiveVideos === "boolean"
         ? settings.excludeLiveVideos
@@ -452,20 +486,18 @@ function sanitizeSettings(settings) {
       settings?.dailyLimitMode === "both"
         ? settings.dailyLimitMode
         : DEFAULT_SETTINGS.dailyLimitMode,
-    maxVideosPerDay:
-      Number.isInteger(Number(settings?.maxVideosPerDay)) && Number(settings.maxVideosPerDay) >= 1
-        ? Number(settings.maxVideosPerDay)
-        : DEFAULT_SETTINGS.maxVideosPerDay,
+    // Upper bounds guard against corrupted sync pushes / direct storage writes.
+    // 100 is well above any realistic daily-watch cap; 24h cap is the
+    // tautological maximum for "seconds per day". Without these, a bad value
+    // silently disables the daily-limit takeover (the comparison never trips).
+    maxVideosPerDay: clampInteger(settings?.maxVideosPerDay, 1, 100, DEFAULT_SETTINGS.maxVideosPerDay),
     maxSecondsPerDay:
-      Number.isFinite(Number(settings?.maxSecondsPerDay)) && Number(settings.maxSecondsPerDay) >= 1
+      Number.isFinite(Number(settings?.maxSecondsPerDay)) &&
+      Number(settings.maxSecondsPerDay) >= 1 &&
+      Number(settings.maxSecondsPerDay) <= 24 * 60 * 60
         ? Number(settings.maxSecondsPerDay)
         : DEFAULT_SETTINGS.maxSecondsPerDay,
-    workCustomMinutes:
-      Number.isInteger(Number(settings?.workCustomMinutes)) &&
-      Number(settings.workCustomMinutes) >= 1 &&
-      Number(settings.workCustomMinutes) <= 60 * 24
-        ? Number(settings.workCustomMinutes)
-        : DEFAULT_SETTINGS.workCustomMinutes
+    workCustomMinutes: clampInteger(settings?.workCustomMinutes, 1, 60 * 24, DEFAULT_SETTINGS.workCustomMinutes)
   };
 }
 
@@ -613,7 +645,7 @@ async function clearWorkSession() {
 
 async function saveSettings(settings) {
   const clean = sanitizeSettings(settings);
-  clean._updatedAt = Date.now();
+  clean._updatedAt = getNow();
   await chrome.storage.local.set({ [SETTINGS_KEY]: clean });
   await priorityWriteSync(
     { [SETTINGS_KEY]: clean },
@@ -628,45 +660,24 @@ async function saveSettings(settings) {
   );
 }
 
-async function getHiddenItems() {
-  const data = await chrome.storage.local.get([
-    STORAGE_HIDDEN_VIDEOS_KEY,
-    STORAGE_HIDDEN_CHANNELS_KEY
-  ]);
-
-  const videos = Array.isArray(data[STORAGE_HIDDEN_VIDEOS_KEY])
-    ? data[STORAGE_HIDDEN_VIDEOS_KEY]
-    : [];
-  const channels = Array.isArray(data[STORAGE_HIDDEN_CHANNELS_KEY])
-    ? data[STORAGE_HIDDEN_CHANNELS_KEY]
-    : [];
-
-  return {
-    videos: new Set(videos.filter(Boolean)),
-    channels: new Set(channels.filter(Boolean))
-  };
+function getArrayFromStorage(data, key) {
+  return Array.isArray(data[key]) ? data[key] : [];
 }
 
-async function getHiddenItemsWithMetadata() {
-  const data = await chrome.storage.local.get([
-    STORAGE_HIDDEN_VIDEOS_KEY,
-    STORAGE_HIDDEN_CHANNELS_KEY,
-    STORAGE_HIDDEN_METADATA_KEY
-  ]);
+async function getHiddenItems(includeMetadata = false) {
+  const keys = [STORAGE_HIDDEN_VIDEOS_KEY, STORAGE_HIDDEN_CHANNELS_KEY];
+  if (includeMetadata) keys.push(STORAGE_HIDDEN_METADATA_KEY);
 
-  const videos = Array.isArray(data[STORAGE_HIDDEN_VIDEOS_KEY])
-    ? data[STORAGE_HIDDEN_VIDEOS_KEY]
-    : [];
-  const channels = Array.isArray(data[STORAGE_HIDDEN_CHANNELS_KEY])
-    ? data[STORAGE_HIDDEN_CHANNELS_KEY]
-    : [];
-
-  return {
-    videos: new Set(videos.filter(Boolean)),
-    channels: new Set(channels.filter(Boolean)),
-    metadata: data[STORAGE_HIDDEN_METADATA_KEY] || {}
+  const data = await chrome.storage.local.get(keys);
+  const result = {
+    videos: new Set(getArrayFromStorage(data, STORAGE_HIDDEN_VIDEOS_KEY).filter(Boolean)),
+    channels: new Set(getArrayFromStorage(data, STORAGE_HIDDEN_CHANNELS_KEY).filter(Boolean))
   };
+  if (includeMetadata) result.metadata = data[STORAGE_HIDDEN_METADATA_KEY] || {};
+  return result;
 }
+
+const getHiddenItemsWithMetadata = () => getHiddenItems(true);
 
 async function persistHiddenState(state) {
   let videoIds = [...state.videos];
@@ -699,19 +710,44 @@ async function persistHiddenState(state) {
   const syncChannels = channelIds
     .slice(-SYNC_HIDDEN_CHANNELS_CAP)
     .map(shrinkChannelKey);
+  // Hidden lists are themselves high-priority sync content, so when over
+  // quota evict the lower-priority data first (positions, then watched, then
+  // weekly videos) rather than the keys we're trying to write. priorityWriteSync
+  // also defensively skips payload-overlapping evict keys, but the right list
+  // here is "other things to drop", not "our own data".
   await priorityWriteSync(
     {
       [STORAGE_HIDDEN_VIDEOS_KEY]: syncVideos,
       [STORAGE_HIDDEN_CHANNELS_KEY]: syncChannels
     },
-    { evictKeysInOrder: [STORAGE_HIDDEN_CHANNELS_KEY, STORAGE_HIDDEN_VIDEOS_KEY] }
+    {
+      evictKeysInOrder: [
+        STORAGE_PROGRESS_KEY,
+        STORAGE_WATCHED_VIDEOS_KEY,
+        STORAGE_VIDEOS_KEY
+      ]
+    }
   );
   // Drop any legacy metadata blob left over in sync from older builds —
   // we now rebuild via the oEmbed backfill instead of carrying it through.
   safeSyncRemove([STORAGE_HIDDEN_METADATA_KEY]).catch(() => {});
 }
 
-let hiddenWriteChain = Promise.resolve();
+// Builds a serial queue: each enqueued fn runs only after the previous one
+// settles (resolve OR reject), so read-modify-write sequences against the same
+// storage key can't interleave. Returns the fn's own result/rejection to the
+// caller while keeping the internal chain alive. Used for the hidden / watched
+// / progress write paths below.
+function makeSerialQueue() {
+  let chain = Promise.resolve();
+  return fn => {
+    const next = chain.then(fn, fn);
+    chain = next.then(() => undefined, () => undefined);
+    return next;
+  };
+}
+
+const enqueueHiddenWrite = makeSerialQueue();
 
 function modifyHidden(modifyFn) {
   const run = async () => {
@@ -720,20 +756,15 @@ function modifyHidden(modifyFn) {
     await persistHiddenState(state);
     return state;
   };
-  const next = hiddenWriteChain.then(run, run);
-  hiddenWriteChain = next.then(() => undefined, () => undefined);
-  return next;
+  return enqueueHiddenWrite(run);
 }
 
 async function getWatchedVideos() {
   const data = await chrome.storage.local.get([STORAGE_WATCHED_VIDEOS_KEY]);
-  const list = Array.isArray(data[STORAGE_WATCHED_VIDEOS_KEY])
-    ? data[STORAGE_WATCHED_VIDEOS_KEY]
-    : [];
-  return new Set(list.filter(Boolean));
+  return new Set(getArrayFromStorage(data, STORAGE_WATCHED_VIDEOS_KEY).filter(Boolean));
 }
 
-let watchedWriteChain = Promise.resolve();
+const enqueueWatchedWrite = makeSerialQueue();
 
 function modifyWatched(modifyFn) {
   const run = async () => {
@@ -751,9 +782,7 @@ function modifyWatched(modifyFn) {
     );
     return set;
   };
-  const next = watchedWriteChain.then(run, run);
-  watchedWriteChain = next.then(() => undefined, () => undefined);
-  return next;
+  return enqueueWatchedWrite(run);
 }
 
 async function getVideoProgressMap() {
@@ -762,7 +791,7 @@ async function getVideoProgressMap() {
   return map && typeof map === "object" ? map : {};
 }
 
-let progressWriteChain = Promise.resolve();
+const enqueueProgressWrite = makeSerialQueue();
 
 // Locally, progress entries are `{ position, duration }` in seconds — duration
 // is convenient for fast bar rendering without re-parsing the formatted
@@ -822,9 +851,7 @@ function setVideoProgress(videoId, position, duration) {
     };
     await chrome.storage.local.set({ [STORAGE_PROGRESS_KEY]: map });
   };
-  const next = progressWriteChain.then(run, run);
-  progressWriteChain = next.then(() => undefined, () => undefined);
-  return next;
+  return enqueueProgressWrite(run);
 }
 
 function clearVideoProgress(videoId) {
@@ -835,9 +862,7 @@ function clearVideoProgress(videoId) {
     delete map[videoId];
     await chrome.storage.local.set({ [STORAGE_PROGRESS_KEY]: map });
   };
-  const next = progressWriteChain.then(run, run);
-  progressWriteChain = next.then(() => undefined, () => undefined);
-  return next;
+  return enqueueProgressWrite(run);
 }
 
 function mergeProgressMaps(localMap, incomingMap) {
@@ -906,9 +931,7 @@ function flushProgressToSync() {
       { evictKeysInOrder: [STORAGE_HIDDEN_CHANNELS_KEY, STORAGE_HIDDEN_VIDEOS_KEY] }
     );
   };
-  const next = progressWriteChain.then(run, run);
-  progressWriteChain = next.then(() => undefined, () => undefined);
-  return next;
+  return enqueueProgressWrite(run);
 }
 
 function slimVideoForStorage(video) {
@@ -941,9 +964,10 @@ function videoLooksLive(video) {
   if (/\bscheduled\s+for\b/i.test(meta)) return true;
   if (/\bstarted\s+streaming\b/i.test(meta)) return true;
   // Past live stream replays — YouTube tags them with "Streamed N units ago"
-  // in place of the upload-time line. Require a digit so a stray title-bleed
+  // OR "Streamed live N units ago" (the latter form appears for some replays
+  // and locales). Still require a digit before "ago" so a stray title-bleed
   // containing the word "streamed" can't false-positive a regular video.
-  if (/\bstreamed\s+\d+\b/i.test(meta)) return true;
+  if (/\bstreamed\b.*?\d+.*?\bago\b/i.test(meta)) return true;
   // Fallback: no fixed duration and metadata lacks both "views" and "ago"
   // → strongly indicates a current live broadcast. Stubs from sync have
   // empty metadata and are skipped so we don't false-positive there.
@@ -1164,6 +1188,21 @@ async function pushLocalToSyncIfMissing(sync) {
   }
 }
 
+// Serialize sync->local reconciliation. applySyncChangeToLocal does a
+// read-modify-write across several keys; two sync events (or a concurrent
+// local write) interleaving between its reads and its final write would let
+// the later write clobber the earlier merge, losing hidden/watched IDs or
+// settings. Route every invocation through this chain so they run one at a
+// time — same pattern as modifyHidden/modifyWatched.
+let _syncChangeChain = Promise.resolve();
+function queueSyncChange(changes) {
+  _syncChangeChain = _syncChangeChain.then(
+    () => applySyncChangeToLocal(changes),
+    () => applySyncChangeToLocal(changes)
+  );
+  return _syncChangeChain.catch(() => {});
+}
+
 async function applySyncChangeToLocal(changes) {
   const candidates = {};
   if (changes[SETTINGS_KEY] && changes[SETTINGS_KEY].newValue) {
@@ -1280,4 +1319,306 @@ async function applySyncChangeToLocal(changes) {
   if (Object.keys(updates).length > 0) {
     await chrome.storage.local.set(updates);
   }
+}
+
+/* ---------- HTTP-FETCH HOME PARSER ---------- */
+// Used by the primary refresh path (HTTP fetch of youtube.com instead of
+// the visible bounce + DOM scrape). The fetch itself runs in the background
+// script — content-script fetch is unreliable in Firefox (privacy/tracking
+// protection treats the extension-origin fetch as cross-origin and
+// intermittently aborts it). Background returns the raw HTML; parsing lives
+// here so the same code is reachable from background, content, and tests.
+
+const YT_INITIAL_DATA_RE = /var ytInitialData\s*=\s*({.+?});\s*<\/script>/s;
+
+function normalizeRelativeYouTubeUrl(href) {
+  if (!href) return "";
+  if (href.startsWith("http")) return href;
+  return "https://www.youtube.com" + href;
+}
+
+// Parses one lockupViewModel node from ytInitialData into the same shape
+// the DOM scraper produces. Returns null when the lockup is an ad, a
+// non-video (playlist / channel mix / shelf), or is missing the fields
+// we need.
+function parseLockupViewModel(lockup) {
+  if (!lockup) return null;
+  if (lockup.contentType !== "LOCKUP_CONTENT_TYPE_VIDEO") return null;
+  if (!lockup.contentId) return null;
+  // feedAdMetadataViewModel is the giveaway for the (rare) ad lockups
+  // that share the LOCKUP_CONTENT_TYPE_VIDEO type.
+  if (lockup.metadata?.feedAdMetadataViewModel) return null;
+
+  const meta = lockup.metadata?.lockupMetadataViewModel;
+  if (!meta) return null;
+
+  const videoId = lockup.contentId;
+  const title = meta.title?.content;
+  if (!title) return null;
+
+  // metadataRows[0] is the channel row; metadataRows[1] is "views • date".
+  // YouTube very occasionally inserts an extra row (chapters, "Recommended
+  // for you" reason) — identify content by regex on the text, not by index.
+  const rows = meta.metadata?.contentMetadataViewModel?.metadataRows || [];
+  let channelName = "";
+  let channelUrl = "";
+  let views = "";
+  let date = "";
+  for (const row of rows) {
+    const parts = row?.metadataParts || [];
+    for (const part of parts) {
+      const text = part?.text?.content || "";
+      if (!text) continue;
+      const handleUrl =
+        part?.text?.commandRuns?.[0]?.onTap?.innertubeCommand?.commandMetadata
+          ?.webCommandMetadata?.url;
+      // Only accept handle / channel / legacy-c URLs as the channel link.
+      // YouTube occasionally inserts other tap-target rows (hashtags, topics,
+      // playlists) before the channel byline, and those have webCommandMetadata.url
+      // too. Gating on the path prefix prevents storing one as the channel.
+      if (handleUrl && !channelName && /^\/(@|channel\/|c\/)/.test(handleUrl)) {
+        channelName = text;
+        // Make URL absolute, matching what the DOM-scrape path stores via
+        // findChannelUrl. Hidden-channel matching uses channelUrl as the key,
+        // so the two refresh paths must agree.
+        channelUrl = normalizeRelativeYouTubeUrl(handleUrl);
+        continue;
+      }
+      if (!views && /views|watching/i.test(text)) { views = text; continue; }
+      if (!date && /ago|streamed|premiered|premieres/i.test(text)) {
+        date = text;
+        continue;
+      }
+    }
+  }
+  const metadata = views && date ? `${views} • ${date}` : (views || date || "");
+
+  // Duration / live badge sits in the thumbnail bottom overlay. "LIVE",
+  // "PREMIERE", or "UPCOMING" text here means the video itself is live —
+  // distinct from the channel's live ring on the avatar (decoratedAvatarViewModel
+  // .liveData.liveBadgeText) which only signals the channel is live, possibly
+  // on a different video.
+  const overlays = lockup.contentImage?.thumbnailViewModel?.overlays || [];
+  let durationText = "";
+  for (const overlay of overlays) {
+    const badges = overlay.thumbnailBottomOverlayViewModel?.badges || [];
+    for (const badge of badges) {
+      const text = badge.thumbnailBadgeViewModel?.text;
+      if (text) { durationText = text; break; }
+    }
+    if (durationText) break;
+  }
+  const isLive = /^(LIVE|PREMIERE|UPCOMING)$/i.test(durationText);
+  const duration = isLive ? "" : durationText;
+
+  const imgSources = lockup.contentImage?.thumbnailViewModel?.image?.sources || [];
+  const bestThumb = imgSources.reduce(
+    (a, b) => ((b?.width || 0) > (a?.width || 0) ? b : a),
+    null
+  );
+  const thumbnail = bestThumb?.url || "";
+
+  const avatarSources =
+    meta.image?.decoratedAvatarViewModel?.avatar?.avatarViewModel?.image?.sources || [];
+  const avatar = avatarSources[0]?.url || "";
+
+  return {
+    videoId,
+    title,
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    thumbnail,
+    pageThumbnail: "",
+    duration,
+    channelName,
+    channelUrl,
+    metadata,
+    avatar,
+    membersOnly: false,
+    membersOnlyCheckedAt: Date.now(),
+    isLive
+  };
+}
+
+// Full pipeline: HTML response from youtube.com → ytInitialData JSON →
+// walk for lockupViewModel nodes → per-lockup parse → deduped video array.
+// Throws if ytInitialData isn't present in the response (no match for the
+// regex — typical with a consent wall, 429, or a fundamentally different
+// page).
+function extractVideosFromYouTubeHomeHtml(html) {
+  const m = html.match(YT_INITIAL_DATA_RE);
+  if (!m) throw new Error("no ytInitialData in response");
+  const data = JSON.parse(m[1]);
+
+  const lockups = [];
+  (function walk(node) {
+    if (!node || typeof node !== "object") return;
+    if (node.lockupViewModel) lockups.push(node.lockupViewModel);
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    for (const k of Object.keys(node)) walk(node[k]);
+  })(data);
+
+  const videos = [];
+  const seen = new Set();
+  for (const lockup of lockups) {
+    const video = parseLockupViewModel(lockup);
+    if (!video) continue;
+    if (seen.has(video.videoId)) continue;
+    seen.add(video.videoId);
+    videos.push(video);
+  }
+  return videos;
+}
+
+/* ---------- WEEKLY GRID — PURE HELPERS (shared by background + content) ---------- */
+// These live here (not content.js) because the background owns the refresh:
+// it filters/picks videos before saving. They are pure (no DOM, no chrome.*
+// beyond getStoredWeeklyVideos) so both contexts can call them.
+
+// Non-DOM HTML-entity decoder. content.js has a textarea-based decodeHtml for
+// rich render-time decoding, but that needs the DOM; the background can't use
+// it. This covers the entities that actually appear in channel names/URLs for
+// hidden-item matching: named basics + numeric (decimal and hex) refs.
+function decodeHtmlEntities(value) {
+  if (!value) return "";
+  return String(value)
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)));
+}
+
+async function getStoredWeeklyVideos() {
+  const data = await chrome.storage.local.get([
+    STORAGE_VIDEOS_KEY,
+    STORAGE_REFRESH_AFTER_KEY
+  ]);
+  return {
+    videos: data[STORAGE_VIDEOS_KEY],
+    refreshAfter: data[STORAGE_REFRESH_AFTER_KEY]
+  };
+}
+
+function getNextRefreshTime(settings, fromDate = new Date(getNow())) {
+  const mode = settings.refreshMode || "weekly";
+  const refreshHour = settings.refreshHour;
+
+  if (mode === "daily") {
+    const next = new Date(fromDate);
+    next.setHours(refreshHour, 0, 0, 0);
+    if (next <= fromDate) {
+      next.setDate(next.getDate() + 1);
+    }
+    return next.getTime();
+  }
+
+  const days =
+    mode === "multi" &&
+    Array.isArray(settings.refreshDays) &&
+    settings.refreshDays.length > 0
+      ? settings.refreshDays
+      : [settings.refreshDay];
+
+  let best = Infinity;
+  for (const day of days) {
+    const candidate = new Date(fromDate);
+    const daysUntil = (day - candidate.getDay() + 7) % 7;
+    candidate.setDate(candidate.getDate() + daysUntil);
+    candidate.setHours(refreshHour, 0, 0, 0);
+    if (candidate <= fromDate) {
+      candidate.setDate(candidate.getDate() + 7);
+    }
+    if (candidate.getTime() < best) best = candidate.getTime();
+  }
+  return best;
+}
+
+function isVideoHidden(video, hidden) {
+  if (!video) return true;
+
+  if (video.videoId && hidden.videos.has(video.videoId)) {
+    return true;
+  }
+
+  const channelUrl = decodeHtmlEntities(video.channelUrl || "").trim().toLowerCase();
+  if (channelUrl && hidden.channels.has(channelUrl)) {
+    return true;
+  }
+
+  const channelName = decodeHtmlEntities(video.channelName || "").trim().toLowerCase();
+  if (channelName && hidden.channels.has(`name:${channelName}`)) {
+    return true;
+  }
+
+  return false;
+}
+
+function filterHiddenVideos(videos, hidden) {
+  return (Array.isArray(videos) ? videos : []).filter(video => {
+    return !isVideoHidden(video, hidden);
+  });
+}
+
+// Pick the weekly grid: dedupe, drop hidden, prefer fully-populated entries
+// (have view-count metadata + avatar + duration) then backfill to videoCount.
+function chooseWeeklyVideos(videos, videoCount, hidden = null) {
+  const seen = new Set();
+
+  const valid = videos.filter(video => {
+    if (!video.title || !video.videoId) return false;
+    if (seen.has(video.videoId)) return false;
+    if (hidden && isVideoHidden(video, hidden)) return false;
+
+    seen.add(video.videoId);
+    return true;
+  });
+
+  const complete = valid.filter(video =>
+    video.metadata &&
+    /views/i.test(video.metadata) &&
+    video.avatar &&
+    video.duration
+  );
+
+  const chosen = [...complete];
+
+  for (const video of valid) {
+    if (chosen.length >= videoCount) break;
+    if (!chosen.some(existing => existing.videoId === video.videoId)) {
+      chosen.push(video);
+    }
+  }
+
+  return chosen.slice(0, videoCount);
+}
+
+/* ---------- SHARED UI HELPERS (options + popup) ---------- */
+// Both the options page and the popup show a transient "#status" toast and
+// render hidden-channel labels; these were duplicated in options.js + popup.js.
+// They live here so there's one copy. (Harmless in content/background contexts,
+// which simply never call them.)
+
+function showStatus(message, isSuccess = true) {
+  const status = document.getElementById("status");
+  if (!status) return;
+  status.textContent = message;
+  status.className = `status show ${isSuccess ? "success" : "info"}`;
+  setTimeout(() => {
+    status.classList.remove("show");
+  }, 2000);
+}
+
+// Hidden channels are stored by their channelUrl. There's no oEmbed endpoint
+// for channels, but the URL itself almost always carries a @handle or UC id
+// that's a usable display label.
+function channelDisplayFromKey(key) {
+  if (!key) return null;
+  const handle = key.match(/@([^/?#&]+)/);
+  if (handle) return `@${handle[1]}`;
+  const ucId = key.match(/\/channel\/(UC[^/?#&]+)/i);
+  if (ucId) return ucId[1];
+  return null;
 }

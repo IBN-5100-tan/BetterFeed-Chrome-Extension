@@ -21,13 +21,12 @@
 //                          after a sync hydrate, since sync only ships video IDs.
 //   - FILTERS / EXTRACTORS: Pull a clean video record out of the raw home-grid
 //                          DOM, rejecting Shorts/mixes/ads/live broadcasts.
-//   - SCRAPER            : Snapshot N candidate videos from the native home
-//                          grid. Triggered when a refresh is due — content.js
-//                          asks the service worker to drop the redirect rule,
-//                          navigates to youtube.com/, scrapes, then bounces
-//                          back to the marker URL.
-//   - WEEKLY LOGIC       : getOrCreateWeeklyVideos — the pipeline that turns
-//                          a refresh-due state into a fresh stored video list.
+//   - WEEKLY GRID RENDER : renderFromStorage — pure read of the stored grid +
+//                          background-owned refresh status; paints the grid,
+//                          the "Refreshing…" loader, or a quiet retry message.
+//                          content.js no longer fetches/scrapes/saves — the
+//                          background owns the entire refresh (see background.js
+//                          ensureFreshVideos).
 //   - MAIN / update()    : Single dispatcher. Decides on every navigation /
 //                          state change what to render: cold-start, mode
 //                          picker, weekly home, Work placeholder, See-you-
@@ -53,11 +52,8 @@
 // state machine class, just a tower of `if`s in update().
 // =============================================================================
 
-const SCRAPE_CANDIDATE_COUNT = 36;
-// Extra videos saved beyond settings.videoCount so render-time filtering of
-// late-detected live streams (e.g., "Streamed X ago" surfaced only by the
-// watch-page recheck) doesn't shrink the visible grid below the target.
-const REFRESH_BACKFILL_BUFFER = 5;
+// REFRESH_BACKFILL_BUFFER and MAX_WEEKLY_VIDEOS live in shared.js (the
+// background needs them too); referenced here via the shared global scope.
 
 const CUSTOM_HOME_ID = "better-feed-home";
 
@@ -75,78 +71,28 @@ const BODY_CLASS_HIDE_MIX_RADIO_PLAYLISTS = "better-feed-hide-mix-radio-playlist
 const BODY_CLASS_HIDE_VOICE_SEARCH = "better-feed-hide-voice-search";
 const BODY_CLASS_HIDE_CREATE_BUTTON = "better-feed-hide-create-button";
 
-const FETCH_TIMEOUT_MS = 1800;
-
 let updateInProgress = false;
+// When an update() arrives while another is still running, mark it pending and
+// run it after. Multiple storage.onChanged listeners fire concurrently — e.g.
+// STORAGE_VIDEOS_KEY and STORAGE_REFRESH_STATUS_KEY both call update() while
+// renderFromStorage is mid-await — and dropping the second would leave the grid
+// stale.
+let updatePendingAfterCurrent = false;
 let renderToken = 0;
-
-/* ---------- SELECTORS ---------- */
-
-const TITLE_SELECTORS = [
-  "#video-title",
-  "a#video-title",
-  "a#video-title-link",
-  "yt-formatted-string#video-title",
-  "h3 a"
-];
-
-const CHANNEL_SELECTORS = [
-  "ytd-channel-name a",
-  "#channel-name a",
-  "a.yt-simple-endpoint[href^='/@']",
-  "a.yt-simple-endpoint[href^='/channel/']",
-  "a.yt-simple-endpoint[href^='/c/']",
-  "a[href^='/@']",
-  "a[href^='/channel/']",
-  "a[href^='/c/']"
-];
-
-const DURATION_SELECTORS = [
-  "ytd-thumbnail-overlay-time-status-renderer #text",
-  "ytd-thumbnail-overlay-time-status-renderer span",
-  "yt-thumbnail-overlay-time-status-renderer #text",
-  "yt-thumbnail-overlay-time-status-renderer span",
-  ".badge-shape-wiz__text",
-  "#text",
-  "span"
-];
-
-const AVATAR_SELECTORS = [
-  "#avatar img",
-  "yt-img-shadow#avatar img",
-  "a#avatar-link img",
-  "img"
-];
-
-const ARIA_LABEL_SELECTORS = [
-  "a#video-title[aria-label]",
-  "a#video-title-link[aria-label]",
-  "a[href*='/watch?v='][aria-label]"
-];
-
-const METADATA_SELECTORS = [
-  "#metadata-line span",
-  "ytd-video-meta-block #metadata-line span",
-  "span.inline-metadata-item",
-  "yt-formatted-string.inline-metadata-item"
-];
-
-/* ---------- REGEX PATTERNS ---------- */
-
-const REGEX_DURATION_SHORT = /^\d+:\d{2}$/;
-const REGEX_DURATION_LONG = /^\d+:\d{2}:\d{2}$/;
-const REGEX_VIEWS_SHORT = /[\d,.]+[KMB]?\s+views/i;
-const REGEX_VIEWS_NONE = /No views/i;
-const REGEX_DATE_LONG = /\d+\s+(second|minute|hour|day|week|month|year)s?\s+ago/i;
-const REGEX_DATE_SHORT = /\d+\s*(s|m|h|d|w|mo|y)\s+ago/i;
-const REGEX_ISO_DATE = /\d{4}-\d{2}-\d{2}/;
 
 /* ---------- THEME ---------- */
 
+let _lastDetectedBg = null;
 function detectAndApplyTheme() {
   const bg = getComputedStyle(document.documentElement).backgroundColor;
   const match = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
   if (!match) return;
+  // Bail if nothing changed. Otherwise the setProperty below rewrites the
+  // inline style attribute, which the MutationObserver (attributes:true) sees
+  // as a change and re-invokes us — needless churn on every unrelated
+  // attribute mutation.
+  if (bg === _lastDetectedBg) return;
+  _lastDetectedBg = bg;
 
   const r = Number(match[1]);
   const g = Number(match[2]);
@@ -178,6 +124,23 @@ function ensureThemeObserver() {
 // over there activate when the matching class is present and the matching
 // DOM element exists.
 
+// [body class, settings flag] for each cleanup toggle. Driven as a table so
+// applyFeatureSettings stays a single loop instead of 13 repeated lines.
+const FEATURE_CLASS_SETTINGS = [
+  [BODY_CLASS_HIDE_SHORTS, "hideShorts"],
+  [BODY_CLASS_HIDE_WATCH_RECS, "hideWatchRecs"],
+  [BODY_CLASS_DISABLE_AUTOPLAY, "disableAutoplay"],
+  [BODY_CLASS_HIDE_END_SCREEN_CARDS, "hideEndScreenCards"],
+  [BODY_CLASS_HIDE_LIVE_CHAT, "hideLiveChat"],
+  [BODY_CLASS_HIDE_WATCH_SIDE_PANEL, "hideWatchSidePanel"],
+  [BODY_CLASS_HIDE_COMMENTS, "hideComments"],
+  [BODY_CLASS_HIDE_NOTIFICATION_BELL, "hideNotificationBell"],
+  [BODY_CLASS_HIDE_EXPLORE_TRENDING, "hideExploreTrending"],
+  [BODY_CLASS_HIDE_MORE_FROM_YOUTUBE, "hideMoreFromYoutube"],
+  [BODY_CLASS_HIDE_MIX_RADIO_PLAYLISTS, "hideMixRadioPlaylists"],
+  [BODY_CLASS_HIDE_VOICE_SEARCH, "hideVoiceSearch"],
+  [BODY_CLASS_HIDE_CREATE_BUTTON, "hideCreateButton"]
+];
 
 async function applyFeatureSettings() {
   const settings = await getSettings();
@@ -185,39 +148,19 @@ async function applyFeatureSettings() {
   const watchActive = mode === MODE_WATCH;
   const root = document.documentElement;
 
-  const showNativeHome = !watchActive || !settings.enabled || !settings.weeklyHomeEnabled;
+  // Show YouTube's native home (don't inject our grid) when the user isn't in
+  // Watch mode or has the extension / weekly home turned off.
+  const showNativeHome =
+    !watchActive || !settings.enabled || !settings.weeklyHomeEnabled;
   root.classList.toggle("better-feed-show-native-home", showNativeHome);
 
-  if (!settings.enabled) {
-    root.classList.remove(BODY_CLASS_HIDE_SHORTS);
-    root.classList.remove(BODY_CLASS_HIDE_WATCH_RECS);
-    root.classList.remove(BODY_CLASS_DISABLE_AUTOPLAY);
-    root.classList.remove(BODY_CLASS_HIDE_END_SCREEN_CARDS);
-    root.classList.remove(BODY_CLASS_HIDE_LIVE_CHAT);
-    root.classList.remove(BODY_CLASS_HIDE_WATCH_SIDE_PANEL);
-    root.classList.remove(BODY_CLASS_HIDE_COMMENTS);
-    root.classList.remove(BODY_CLASS_HIDE_NOTIFICATION_BELL);
-    root.classList.remove(BODY_CLASS_HIDE_EXPLORE_TRENDING);
-    root.classList.remove(BODY_CLASS_HIDE_MORE_FROM_YOUTUBE);
-    root.classList.remove(BODY_CLASS_HIDE_MIX_RADIO_PLAYLISTS);
-    root.classList.remove(BODY_CLASS_HIDE_VOICE_SEARCH);
-    root.classList.remove(BODY_CLASS_HIDE_CREATE_BUTTON);
-    return;
+  // Each cleanup toggle maps a body class to its settings flag. When the
+  // extension is disabled, every class is forced off (toggle(_, false) removes
+  // it) and we return before any feature work.
+  for (const [cls, key] of FEATURE_CLASS_SETTINGS) {
+    root.classList.toggle(cls, settings.enabled && settings[key]);
   }
-
-  root.classList.toggle(BODY_CLASS_HIDE_SHORTS, settings.hideShorts);
-  root.classList.toggle(BODY_CLASS_HIDE_WATCH_RECS, settings.hideWatchRecs);
-  root.classList.toggle(BODY_CLASS_DISABLE_AUTOPLAY, settings.disableAutoplay);
-  root.classList.toggle(BODY_CLASS_HIDE_END_SCREEN_CARDS, settings.hideEndScreenCards);
-  root.classList.toggle(BODY_CLASS_HIDE_LIVE_CHAT, settings.hideLiveChat);
-  root.classList.toggle(BODY_CLASS_HIDE_WATCH_SIDE_PANEL, settings.hideWatchSidePanel);
-  root.classList.toggle(BODY_CLASS_HIDE_COMMENTS, settings.hideComments);
-  root.classList.toggle(BODY_CLASS_HIDE_NOTIFICATION_BELL, settings.hideNotificationBell);
-  root.classList.toggle(BODY_CLASS_HIDE_EXPLORE_TRENDING, settings.hideExploreTrending);
-  root.classList.toggle(BODY_CLASS_HIDE_MORE_FROM_YOUTUBE, settings.hideMoreFromYoutube);
-  root.classList.toggle(BODY_CLASS_HIDE_MIX_RADIO_PLAYLISTS, settings.hideMixRadioPlaylists);
-  root.classList.toggle(BODY_CLASS_HIDE_VOICE_SEARCH, settings.hideVoiceSearch);
-  root.classList.toggle(BODY_CLASS_HIDE_CREATE_BUTTON, settings.hideCreateButton);
+  if (!settings.enabled) return;
 
   if (settings.disableAutoplay) {
     persistAutoplayDisabledFlag();
@@ -322,7 +265,7 @@ function ensureWeekHeaderListeners() {
 async function renderCustomHome(videos, options = {}) {
   const myToken = ++renderToken;
 
-  const browse = getHomeBrowse();
+  const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
   const [hidden, settings, watched, progressMap] = await Promise.all([
@@ -687,7 +630,6 @@ function parseDurationString(value) {
 }
 
 // MARKER_HASHES / markerHashForMode / markerUrlForMode live in shared.js.
-const REFRESH_RETURN_FLAG = "better-feed-refresh-return";
 
 function isMarkerPage() {
   return MARKER_HASHES.has(location.hash);
@@ -717,6 +659,25 @@ function getHomeBrowse() {
     return document.querySelector("ytd-browse");
   }
   return null;
+}
+
+// Render prologue shared by every function that injects into the home browse
+// container: returns the container, or null after lifting the pre-ready
+// dark-fade. If the container isn't mounted yet, calling markModeReady() here
+// ensures the page can never get stuck dark/unclickable; a later update()
+// re-renders once the DOM is ready.
+function ensureBrowseOrReturn() {
+  const browse = getHomeBrowse();
+  if (!browse) { markModeReady(); return null; }
+  return browse;
+}
+
+// Pin a fixed-position popover just below and right-aligned to a button.
+function positionPopoverBelowButton(popover, refElement) {
+  const rect = refElement.getBoundingClientRect();
+  popover.style.position = "fixed";
+  popover.style.top = `${rect.bottom + 8}px`;
+  popover.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
 }
 
 function isHomePage() {
@@ -943,57 +904,8 @@ function formatWeekRange(settings, now = new Date(getNow())) {
   return `Week of ${MONTH_NAMES_SHORT[start.getMonth()]} ${start.getDate()} - ${MONTH_NAMES_SHORT[end.getMonth()]} ${end.getDate()}`;
 }
 
-function getNextRefreshTime(settings, fromDate = new Date(getNow())) {
-  const mode = settings.refreshMode || "weekly";
-  const refreshHour = settings.refreshHour;
-
-  if (mode === "daily") {
-    const next = new Date(fromDate);
-    next.setHours(refreshHour, 0, 0, 0);
-    if (next <= fromDate) {
-      next.setDate(next.getDate() + 1);
-    }
-    return next.getTime();
-  }
-
-  const days =
-    mode === "multi" &&
-    Array.isArray(settings.refreshDays) &&
-    settings.refreshDays.length > 0
-      ? settings.refreshDays
-      : [settings.refreshDay];
-
-  let best = Infinity;
-  for (const day of days) {
-    const candidate = new Date(fromDate);
-    const daysUntil = (day - candidate.getDay() + 7) % 7;
-    candidate.setDate(candidate.getDate() + daysUntil);
-    candidate.setHours(refreshHour, 0, 0, 0);
-    if (candidate <= fromDate) {
-      candidate.setDate(candidate.getDate() + 7);
-    }
-    if (candidate.getTime() < best) best = candidate.getTime();
-  }
-  return best;
-}
-
-/* ---------- STORAGE ---------- */
-
-async function getStoredWeeklyVideos() {
-  const data = await chrome.storage.local.get([
-    STORAGE_VIDEOS_KEY,
-    STORAGE_REFRESH_AFTER_KEY
-  ]);
-
-  return {
-    videos: data[STORAGE_VIDEOS_KEY],
-    refreshAfter: data[STORAGE_REFRESH_AFTER_KEY]
-  };
-}
-
-async function saveWeeklyVideos(videos, refreshAfter) {
-  await saveWeeklyVideosToStorage(videos, refreshAfter);
-}
+// getNextRefreshTime and getStoredWeeklyVideos moved to shared.js (the
+// background owns the refresh and needs them); referenced via shared global scope.
 
 /* ---------- WEEKLY VIDEO METADATA REBUILD (post-sync hydration) ---------- */
 // Sync ships the weekly grid as IDs only — title/channel are recovered via
@@ -1392,31 +1304,8 @@ function getChannelHideKey(video) {
   return "";
 }
 
-function isVideoHidden(video, hidden) {
-  if (!video) return true;
-
-  if (video.videoId && hidden.videos.has(video.videoId)) {
-    return true;
-  }
-
-  const channelUrl = decodeHtml(video.channelUrl || "").trim().toLowerCase();
-  if (channelUrl && hidden.channels.has(channelUrl)) {
-    return true;
-  }
-
-  const channelName = decodeHtml(video.channelName || "").trim().toLowerCase();
-  if (channelName && hidden.channels.has(`name:${channelName}`)) {
-    return true;
-  }
-
-  return false;
-}
-
-function filterHiddenVideos(videos, hidden) {
-  return (Array.isArray(videos) ? videos : []).filter(video => {
-    return !isVideoHidden(video, hidden);
-  });
-}
+// isVideoHidden and filterHiddenVideos moved to shared.js (background filters
+// before saving); they use shared's non-DOM decodeHtmlEntities.
 
 async function hideVideoAndRefresh(video) {
   if (!video?.videoId) return;
@@ -1483,6 +1372,14 @@ async function refreshVisibleVideosAfterHide() {
     storedVideos = storedVideos.filter(v => !videoLooksLive(v));
   }
 
+  // If filtering emptied the grid (e.g. every remaining video is live with
+  // excludeLiveVideos on), don't paint an empty grid — hand off to update()
+  // so renderFromStorage shows the loader / retry / nudge as appropriate.
+  if (storedVideos.length === 0) {
+    update();
+    return;
+  }
+
   await renderCustomHome(
     storedVideos.slice(0, settings.videoCount),
     { preserveScroll: true }
@@ -1490,31 +1387,6 @@ async function refreshVisibleVideosAfterHide() {
 }
 
 /* ---------- URL HELPERS ---------- */
-
-function parseYouTubeUrl(href) {
-  try {
-    const fullUrl = href.startsWith("http")
-      ? href
-      : "https://www.youtube.com" + href;
-
-    const parsed = new URL(fullUrl);
-
-    const videoId = parsed.searchParams.get("v");
-    const list = parsed.searchParams.get("list");
-    const startRadio = parsed.searchParams.get("start_radio");
-
-    if (!videoId) return null;
-
-    return {
-      videoId,
-      hasPlaylist: Boolean(list),
-      hasStartRadio: Boolean(startRadio),
-      cleanUrl: `https://www.youtube.com/watch?v=${videoId}`
-    };
-  } catch {
-    return null;
-  }
-}
 
 function getVideoIdFromUrl(url) {
   try {
@@ -1525,653 +1397,7 @@ function getVideoIdFromUrl(url) {
   }
 }
 
-function normalizeRelativeUrl(href) {
-  if (!href) return "";
-  if (href.startsWith("http")) return href;
-  return "https://www.youtube.com" + href;
-}
-
-/* ---------- FILTERS ---------- */
-
-function isMixUrl(parsedUrl) {
-  if (!parsedUrl) return true;
-  if (parsedUrl.hasPlaylist) return true;
-  if (parsedUrl.hasStartRadio) return true;
-  return false;
-}
-
-function isSponsoredItem(item) {
-  const text = item.innerText || "";
-
-  if (text.includes("Sponsored")) return true;
-  if (text.includes("Ad ·")) return true;
-  if (text.includes("Book now")) return true;
-  if (text.includes("Buy now")) return true;
-  if (text.includes("Shop now")) return true;
-  if (text.includes("Learn more")) return true;
-
-  if (item.querySelector("ytd-ad-slot-renderer")) return true;
-  if (item.querySelector("ytd-promoted-video-renderer")) return true;
-  if (item.querySelector("ytd-display-ad-renderer")) return true;
-
-  return false;
-}
-
-// YouTube tags member-locked videos with a "Members only" or "Members first"
-// badge. Renderings vary (sometimes the text is visible, sometimes it's just
-// an icon with aria-label, sometimes only the class name reveals it), so we
-// check several signals.
-function isMembersOnlyItem(item) {
-  const text = item.innerText || "";
-  if (/\bMembers (?:only|first)\b/i.test(text)) return true;
-
-  // Aria-label on the badge or its icon.
-  if (
-    item.querySelector(
-      '[aria-label*="Members only" i], [aria-label*="Members first" i], [aria-label*="Members-only" i], [aria-label*="Members-first" i]'
-    )
-  ) return true;
-
-  // Class-name signals — YouTube uses BADGE_STYLE_TYPE_MEMBERS_ONLY_CONTENT
-  // and similar identifiers on the badge element.
-  if (
-    item.querySelector(
-      '[class*="members-only" i], [class*="members-first" i], [class*="MEMBERS_ONLY" i], [class*="MEMBERS_FIRST" i]'
-    )
-  ) return true;
-
-  // Membership-themed icon types on <yt-icon>.
-  if (
-    item.querySelector(
-      'yt-icon[icon-type*="MEMBERSHIP" i], yt-icon[icon*="MEMBERSHIP" i], [aria-label*="Membership" i]'
-    )
-  ) return true;
-
-  // Badge inside ytd-badge-supported-renderer whose label text matches.
-  const badgeNodes = item.querySelectorAll(
-    'ytd-badge-supported-renderer, .badge, [class*="badge-style-type-members" i]'
-  );
-  for (const b of badgeNodes) {
-    const t = (b.textContent || "") + " " + (b.getAttribute("aria-label") || "");
-    if (/Members (?:only|first)/i.test(t)) return true;
-    if (/MEMBERS_(?:ONLY|FIRST)/i.test(b.className || "")) return true;
-  }
-
-  return false;
-}
-
-function isLiveVideoItem(item) {
-  if (item.querySelector(
-    'ytd-thumbnail-overlay-time-status-renderer[overlay-style="LIVE" i],' +
-    'ytd-thumbnail-overlay-time-status-renderer[overlay-style="UPCOMING" i],' +
-    '[overlay-style="LIVE" i], [overlay-style="UPCOMING" i],' +
-    '[class*="badge-style-type-live-now" i],' +
-    '[class*="BADGE_STYLE_TYPE_LIVE_NOW" i],' +
-    '[class*="thumbnail-live" i],' +
-    '[class*="thumbnail-overlay-live" i]'
-  )) return true;
-
-  if (item.querySelector(
-    '[aria-label*="LIVE NOW" i], [aria-label*="watching now" i],' +
-    '[aria-label*="premieres" i], [aria-label*="scheduled for" i],' +
-    '[aria-label*="streaming live" i]'
-  )) return true;
-
-  const badgeNodes = item.querySelectorAll(
-    'ytd-badge-supported-renderer, .badge, [class*="badge-style-type"], [class*="badge-shape"]'
-  );
-  for (const b of badgeNodes) {
-    const t = ((b.textContent || "") + " " + (b.getAttribute("aria-label") || "")).trim();
-    if (/^LIVE$/i.test(t) || /\bLIVE NOW\b/i.test(t) || /\bPREMIERE\b/i.test(t)) return true;
-    if (/LIVE_NOW|UPCOMING|thumbnail-live/i.test(b.className || "")) return true;
-  }
-
-  const meta = item.innerText || "";
-  if (/\bwatching\s+now\b/i.test(meta)) return true;
-  // Some locales drop "now" — "X watching" with no "views" / "ago" is live.
-  if (/\bwatching\b/i.test(meta) && !/\bviews?\b/i.test(meta) && !/\bago\b/i.test(meta)) return true;
-  if (/\bpremieres?\s+(in|at|on)\b/i.test(meta)) return true;
-  if (/\bscheduled\s+for\b/i.test(meta)) return true;
-  // Past live stream replays — "Streamed X ago" — also treated as live.
-  if (/\bstreamed\s+\d+\s+\w+\s+ago\b/i.test(meta)) return true;
-
-  return false;
-}
-
-function isBadTitle(text) {
-  if (!text) return true;
-
-  const cleaned = text.trim();
-
-  if (!cleaned) return true;
-  if (cleaned === "Watch") return true;
-  if (cleaned === "Mix") return true;
-  if (cleaned.startsWith("Mix -")) return true;
-  if (REGEX_DURATION_SHORT.test(cleaned)) return true;
-  if (REGEX_DURATION_LONG.test(cleaned)) return true;
-  if (/views/i.test(cleaned)) return true;
-  if (/ago/i.test(cleaned)) return true;
-  if (cleaned.length < 5) return true;
-
-  return false;
-}
-
-/* ---------- EXTRACTORS ---------- */
-
-function findTitle(item) {
-  const candidates = [];
-
-  for (const selector of TITLE_SELECTORS) {
-    const elements = item.querySelectorAll(selector);
-
-    for (const el of elements) {
-      candidates.push(el.textContent?.trim());
-      candidates.push(el.getAttribute("title"));
-      candidates.push(extractTitleFromAria(el.getAttribute("aria-label")));
-    }
-  }
-
-  const aria = getBestVideoAriaLabel(item);
-  const ariaTitle = extractTitleFromAria(aria);
-  if (ariaTitle) candidates.push(ariaTitle);
-
-  candidates.push(...getTextLines(item));
-
-  return candidates.find(text => !isBadTitle(text)) || null;
-}
-
-// Multi-channel byline strings ("Channel1 and 2 more", "Channel1, Channel2,
-// Channel3") surface on collaboration and fundraiser videos. We display them
-// as single-channel cards using the primary channel only, so the extra-channel
-// tail has to be stripped before storage. The "Channel1 and 2 more" form is
-// the only one we explicitly match — bare "Channel1 and Channel2" is left
-// alone since plenty of legitimate channel names contain " and " (Penn and
-// Teller, Tom and Jerry, etc.).
-function takeFirstChannelText(text) {
-  if (!text) return "";
-  let cleaned = text.trim();
-  if (cleaned.includes(",")) cleaned = cleaned.split(",")[0].trim();
-  cleaned = cleaned
-    .replace(/\s+and\s+\d+\s+(?:more|others?|other\s+channels?)\s*$/i, "")
-    .trim();
-  return cleaned;
-}
-
-function findChannelName(item) {
-  for (const selector of CHANNEL_SELECTORS) {
-    const el = item.querySelector(selector);
-    const text = el?.textContent?.trim();
-
-    if (text && !/views/i.test(text) && !/ago/i.test(text)) {
-      return takeFirstChannelText(text);
-    }
-  }
-
-  const parsed = parseAriaLabel(getBestVideoAriaLabel(item));
-  return takeFirstChannelText(parsed.channelName || "");
-}
-
-function findChannelUrl(item) {
-  for (const selector of CHANNEL_SELECTORS) {
-    const el = item.querySelector(selector);
-    const href = el?.getAttribute("href");
-
-    if (href) return normalizeRelativeUrl(href);
-  }
-
-  return "";
-}
-
-function findMetadata(item) {
-  const fromDom = findMetadataFromDom(item);
-  if (fromDom) return normalizeMetadataDate(fromDom);
-
-  const parsed = parseAriaLabel(getBestVideoAriaLabel(item));
-
-  if (parsed.views && parsed.date) return `${parsed.views} • ${parsed.date}`;
-  if (parsed.views) return parsed.views;
-  if (parsed.date) return parsed.date;
-
-  return "";
-}
-
-function normalizeMetadataDate(metadata) {
-  if (!metadata) return "";
-
-  const parts = metadata.split("•").map(part => part.trim());
-
-  if (parts.length < 2) return metadata;
-
-  const views = parts[0];
-  const datePart = parts.slice(1).join(" • ").trim();
-
-  if (/ago/i.test(datePart)) return metadata;
-
-  const relative = formatPublishDate(datePart);
-
-  return relative ? `${views} • ${relative}` : metadata;
-}
-
-function findMetadataFromDom(item) {
-  const text = item.innerText || "";
-  const normalized = text.replace(/\n/g, " ");
-
-  const viewsMatch =
-    normalized.match(REGEX_VIEWS_SHORT) ||
-    normalized.match(REGEX_VIEWS_NONE);
-
-  const dateMatch =
-    normalized.match(REGEX_DATE_LONG) ||
-    normalized.match(REGEX_DATE_SHORT) ||
-    normalized.match(REGEX_ISO_DATE);
-
-  if (viewsMatch && dateMatch) return `${viewsMatch[0]} • ${dateMatch[0]}`;
-  if (viewsMatch) return viewsMatch[0];
-  if (dateMatch) return dateMatch[0];
-
-  const parts = [];
-
-  for (const selector of METADATA_SELECTORS) {
-    const elements = item.querySelectorAll(selector);
-
-    for (const el of elements) {
-      const value = el.textContent?.trim();
-      if (!value) continue;
-
-      if (
-        /views/i.test(value) ||
-        /ago/i.test(value) ||
-        REGEX_ISO_DATE.test(value)
-      ) {
-        parts.push(value);
-      }
-    }
-  }
-
-  const unique = [...new Set(parts)];
-  const views = unique.find(value => /views/i.test(value));
-  const date =
-    unique.find(value => /ago/i.test(value)) ||
-    unique.find(value => REGEX_ISO_DATE.test(value));
-
-  if (views && date) return `${views} • ${date}`;
-  if (views) return views;
-  if (date) return date;
-
-  return "";
-}
-
-function findDuration(item) {
-  for (const selector of DURATION_SELECTORS) {
-    const elements = item.querySelectorAll(selector);
-
-    for (const el of elements) {
-      const text = normalizeDurationText(el.textContent);
-
-      if (isDurationText(text)) {
-        return text;
-      }
-
-      const aria = normalizeDurationText(el.getAttribute("aria-label"));
-
-      if (isDurationText(aria)) {
-        return aria;
-      }
-    }
-  }
-
-  const lines = getTextLines(item);
-
-  for (const line of lines) {
-    const text = normalizeDurationText(line);
-
-    if (isDurationText(text)) {
-      return text;
-    }
-  }
-
-  const parsed = parseAriaLabel(getBestVideoAriaLabel(item));
-  return parsed.duration || "";
-}
-
-function normalizeDurationText(value) {
-  if (!value) return "";
-
-  return value
-    .replace(/\s+/g, " ")
-    .replace("Duration:", "")
-    .trim();
-}
-
-function isDurationText(value) {
-  if (!value) return false;
-
-  return REGEX_DURATION_SHORT.test(value) || REGEX_DURATION_LONG.test(value);
-}
-
-function findAvatar(item) {
-  for (const selector of AVATAR_SELECTORS) {
-    const imgs = Array.from(item.querySelectorAll(selector));
-
-    for (const img of imgs) {
-      const src = getImageSrc(img);
-      if (!src) continue;
-
-      const decoded = decodeHtml(src);
-
-      if (isAvatarUrl(decoded)) {
-        return decoded;
-      }
-    }
-  }
-
-  return "";
-}
-
-function findThumbnail(item, videoId) {
-  const imgs = Array.from(item.querySelectorAll("img"));
-
-  for (const img of imgs) {
-    const src = getImageSrc(img);
-    if (!src) continue;
-
-    const decoded = decodeHtml(src);
-
-    if (isThumbnailForVideo(decoded, videoId)) {
-      return decoded;
-    }
-  }
-
-  return `https://i.ytimg.com/vi/${videoId}/hq720.jpg`;
-}
-
-function getImageSrc(img) {
-  return (
-    img.currentSrc ||
-    img.src ||
-    img.getAttribute("src") ||
-    img.getAttribute("data-src") ||
-    img.getAttribute("data-thumb") ||
-    img.getAttribute("data-original") ||
-    ""
-  );
-}
-
-function isAvatarUrl(url) {
-  return (
-    url.includes("yt3.ggpht.com") ||
-    url.includes("yt4.ggpht.com") ||
-    url.includes("googleusercontent.com")
-  );
-}
-
-function getTextLines(item) {
-  return (
-    item.innerText
-      ?.split("\n")
-      .map(line => line.trim())
-      .filter(Boolean) || []
-  );
-}
-
-function getBestVideoAriaLabel(item) {
-  for (const selector of ARIA_LABEL_SELECTORS) {
-    const el = item.querySelector(selector);
-    const label = el?.getAttribute("aria-label");
-
-    if (label && REGEX_VIEWS_SHORT.test(label)) return label;
-  }
-
-  const labels = Array.from(item.querySelectorAll("[aria-label]"))
-    .map(el => el.getAttribute("aria-label"))
-    .filter(Boolean);
-
-  return labels.find(label => REGEX_VIEWS_SHORT.test(label)) || labels[0] || "";
-}
-
-function extractTitleFromAria(label) {
-  if (!label) return "";
-
-  const byIndex = label.indexOf(" by ");
-  if (byIndex > 0) {
-    return label.slice(0, byIndex).trim();
-  }
-
-  return "";
-}
-
-function parseAriaLabel(label) {
-  const result = {
-    channelName: "",
-    views: "",
-    date: "",
-    duration: ""
-  };
-
-  if (!label) return result;
-
-  const viewsMatch =
-    label.match(REGEX_VIEWS_SHORT) ||
-    label.match(REGEX_VIEWS_NONE);
-
-  const dateMatch =
-    label.match(REGEX_DATE_LONG) ||
-    label.match(REGEX_DATE_SHORT);
-
-  const durationWordsMatch =
-    label.match(/(\d+)\s+hours?,\s+(\d+)\s+minutes?,\s+(\d+)\s+seconds?/i) ||
-    label.match(/(\d+)\s+minutes?,\s+(\d+)\s+seconds?/i);
-
-  const byMatch = label.match(
-    /\sby\s(.+?)\s(?:No views|[\d,.]+[KMB]?\s+views|\d+\s*(?:s|m|h|d|w|mo|y)\s+ago|\d+\s+(?:second|minute|hour|day|week|month|year)s?\s+ago)/i
-  );
-
-  if (viewsMatch) result.views = viewsMatch[0];
-  if (dateMatch) result.date = dateMatch[0];
-  if (byMatch && byMatch[1]) result.channelName = byMatch[1].trim();
-
-  if (durationWordsMatch) {
-    const numbers = durationWordsMatch
-      .slice(1)
-      .filter(Boolean)
-      .map(Number);
-
-    if (numbers.length === 3) {
-      result.duration = `${numbers[0]}:${String(numbers[1]).padStart(2, "0")}:${String(numbers[2]).padStart(2, "0")}`;
-    }
-
-    if (numbers.length === 2) {
-      result.duration = `${numbers[0]}:${String(numbers[1]).padStart(2, "0")}`;
-    }
-  }
-
-  return result;
-}
-
-/* ---------- ENRICHMENT ---------- */
-
-async function enrichVideosFast(videos) {
-  return Promise.all(videos.map(video => enrichSingleVideo(video)));
-}
-
-async function enrichSingleVideo(video) {
-  const copy = { ...video };
-
-  const avatarPromise =
-    !copy.avatar && copy.channelUrl
-      ? fetchChannelAvatar(copy.channelUrl)
-      : Promise.resolve(copy.avatar || "");
-
-  const detailsPromise =
-    !copy.metadata ||
-    !/views/i.test(copy.metadata) ||
-    !copy.duration ||
-    !copy.pageThumbnail
-      ? fetchVideoDetails(copy.url)
-      : Promise.resolve({
-          metadata: copy.metadata || "",
-          duration: copy.duration || "",
-          pageThumbnail: copy.pageThumbnail || ""
-        });
-
-  const [avatar, details] = await Promise.all([
-    withTimeout(avatarPromise, FETCH_TIMEOUT_MS, ""),
-    withTimeout(detailsPromise, FETCH_TIMEOUT_MS, {
-      metadata: "",
-      duration: "",
-      pageThumbnail: ""
-    })
-  ]);
-
-  if (avatar) copy.avatar = avatar;
-  if (details.metadata) copy.metadata = normalizeMetadataDate(details.metadata);
-  if (details.duration) copy.duration = details.duration;
-  if (details.pageThumbnail && isThumbnailForVideo(details.pageThumbnail, copy.videoId)) {
-    copy.pageThumbnail = details.pageThumbnail;
-  }
-
-  return copy;
-}
-
-function withTimeout(promise, ms, fallback) {
-  return new Promise(resolve => {
-    const timer = setTimeout(() => resolve(fallback), ms);
-
-    promise
-      .then(value => {
-        clearTimeout(timer);
-        resolve(value);
-      })
-      .catch(() => {
-        clearTimeout(timer);
-        resolve(fallback);
-      });
-  });
-}
-
-async function fetchChannelAvatar(channelUrl) {
-  try {
-    const response = await fetch(channelUrl, {
-      credentials: "include"
-    });
-
-    const html = await response.text();
-
-    const ogMatch =
-      html.match(/<meta property="og:image" content="([^"]+)"/i) ||
-      html.match(/<meta name="twitter:image" content="([^"]+)"/i);
-
-    if (ogMatch && ogMatch[1]) {
-      return decodeHtml(ogMatch[1]);
-    }
-
-    return "";
-  } catch {
-    return "";
-  }
-}
-
-async function fetchVideoDetails(videoUrl) {
-  try {
-    const response = await fetch(videoUrl, {
-      credentials: "include"
-    });
-
-    const html = await response.text();
-
-    return {
-      metadata: extractMetadataFromVideoHtml(html),
-      duration: extractDurationFromVideoHtml(html),
-      pageThumbnail: extractThumbnailFromVideoHtml(html)
-    };
-  } catch {
-    return {
-      metadata: "",
-      duration: "",
-      pageThumbnail: ""
-    };
-  }
-}
-
-function extractMetadataFromVideoHtml(html) {
-  const viewCountMatch =
-    html.match(/"viewCount":"(\d+)"/) ||
-    html.match(/"viewCount":\{"simpleText":"([^"]+)"/);
-
-  const publishDateMatch =
-    html.match(/"publishDate":"([^"]+)"/) ||
-    html.match(/<meta itemprop="datePublished" content="([^"]+)"/) ||
-    html.match(/"datePublished":"([^"]+)"/);
-
-  let views = "";
-  let date = "";
-
-  if (viewCountMatch && viewCountMatch[1]) {
-    if (/^\d+$/.test(viewCountMatch[1])) {
-      views = `${formatViewCount(Number(viewCountMatch[1]))} views`;
-    } else {
-      views = viewCountMatch[1];
-    }
-  }
-
-  if (publishDateMatch && publishDateMatch[1]) {
-    date = formatPublishDate(publishDateMatch[1]);
-  }
-
-  if (views && date) return `${views} • ${date}`;
-  if (views) return views;
-  if (date) return date;
-
-  return "";
-}
-
-function extractDurationFromVideoHtml(html) {
-  const lengthSecondsMatch =
-    html.match(/"lengthSeconds":"(\d+)"/) ||
-    html.match(/"lengthSeconds":(\d+)/);
-
-  if (lengthSecondsMatch && lengthSecondsMatch[1]) {
-    return formatDurationFromSeconds(Number(lengthSecondsMatch[1]));
-  }
-
-  const approxDurationMatch =
-    html.match(/"approxDurationMs":"(\d+)"/) ||
-    html.match(/"approxDurationMs":(\d+)/);
-
-  if (approxDurationMatch && approxDurationMatch[1]) {
-    return formatDurationFromSeconds(
-      Math.round(Number(approxDurationMatch[1]) / 1000)
-    );
-  }
-
-  const isoDurationMatch =
-    html.match(/"duration":"PT([^"]+)"/) ||
-    html.match(/<meta itemprop="duration" content="PT([^"]+)"/);
-
-  if (isoDurationMatch && isoDurationMatch[1]) {
-    return formatIsoDuration(isoDurationMatch[1]);
-  }
-
-  return "";
-}
-
-function extractThumbnailFromVideoHtml(html) {
-  const ogImageMatch =
-    html.match(/<meta property="og:image" content="([^"]+)"/i) ||
-    html.match(/<meta name="twitter:image" content="([^"]+)"/i);
-
-  if (ogImageMatch && ogImageMatch[1]) {
-    return decodeHtml(ogImageMatch[1]);
-  }
-
-  const thumbnailUrlMatch = html.match(/"thumbnailUrl":\["([^"]+)"/);
-
-  if (thumbnailUrlMatch && thumbnailUrlMatch[1]) {
-    return decodeHtml(thumbnailUrlMatch[1]);
-  }
-
-  return "";
-}
+/* ---------- METADATA FORMATTING ---------- */
 
 function formatDurationFromSeconds(totalSeconds) {
   if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return "";
@@ -2247,255 +1473,76 @@ function trimNumber(value) {
   return value.toFixed(1).replace(/\.0$/, "");
 }
 
-/* ---------- WAIT ---------- */
+/* ---------- WEEKLY GRID RENDER (pure; background owns the refresh) ---------- */
+// content.js no longer fetches, scrapes, bounces, or saves the weekly grid.
+// The background owns the entire refresh (fetch youtube.com -> parse
+// ytInitialData -> filter/pick -> save) and writes STORAGE_REFRESH_STATUS_KEY.
+// This function only READS storage and paints: the grid, the "Refreshing…"
+// loader, or a quiet retry message. It re-runs reactively via the
+// storage.onChanged listener whenever the background saves videos or flips
+// the status. It never returns null, never navigates, never writes the grid.
 
-function waitForVideoLinks(targetCount, timeoutMs = 8000) {
-  return new Promise(resolve => {
-    const checkVideos = () => {
-      const home = getHomeBrowse();
-      if (!home) return 0;
-      return home.querySelectorAll("ytd-rich-item-renderer a[href*='/watch?v=']").length;
-    };
+// One refresh nudge per page load (see below). Reset implicitly each load
+// because content scripts re-evaluate this module on every navigation.
+let requestedEnsureFreshThisLoad = false;
 
-    if (checkVideos() >= targetCount) {
-      return resolve(true);
-    }
-
-    let settled = false;
-    const finish = value => {
-      if (settled) return;
-      settled = true;
-      observer.disconnect();
-      clearTimeout(timer);
-      resolve(value);
-    };
-
-    const observer = new MutationObserver(() => {
-      if (checkVideos() >= targetCount) finish(true);
-    });
-
-    const timer = setTimeout(() => finish(checkVideos() > 0), timeoutMs);
-
-    observer.observe(document.body, { childList: true, subtree: true });
-  });
-}
-
-/* ---------- SCRAPER ---------- */
-
-function scrapeRecommendations(limit = SCRAPE_CANDIDATE_COUNT, options = {}) {
-  const { excludeLive = true } = options;
-  const home = getHomeBrowse();
-  if (!home) return [];
-
-  const items = Array.from(
-    home.querySelectorAll("ytd-rich-item-renderer")
-  );
-
-  const videos = [];
-  const seenVideoIds = new Set();
-
-  for (const item of items) {
-    if (isSponsoredItem(item)) continue;
-    const live = isLiveVideoItem(item);
-    if (excludeLive && live) continue;
-
-    const linkEl = item.querySelector("a[href*='/watch?v=']");
-    if (!linkEl) continue;
-
-    const href = linkEl.getAttribute("href");
-    if (!href) continue;
-
-    const parsedUrl = parseYouTubeUrl(href);
-    if (!parsedUrl) continue;
-
-    if (isMixUrl(parsedUrl)) continue;
-    if (seenVideoIds.has(parsedUrl.videoId)) continue;
-
-    const title = findTitle(item);
-    if (!title) continue;
-
-    const thumbnail = findThumbnail(item, parsedUrl.videoId);
-    const duration = findDuration(item);
-    const channelName = findChannelName(item);
-    const channelUrl = findChannelUrl(item);
-    const metadata = normalizeMetadataDate(findMetadata(item));
-    const avatar = findAvatar(item);
-
-    videos.push({
-      videoId: parsedUrl.videoId,
-      title,
-      url: parsedUrl.cleanUrl,
-      thumbnail,
-      pageThumbnail: "",
-      duration,
-      channelName,
-      channelUrl,
-      metadata,
-      avatar,
-      membersOnly: isMembersOnlyItem(item),
-      membersOnlyCheckedAt: Date.now(),
-      isLive: live
-    });
-
-    seenVideoIds.add(parsedUrl.videoId);
-
-    if (videos.length >= limit) break;
-  }
-
-  return videos;
-}
-
-function chooseWeeklyVideos(videos, videoCount, hidden = null) {
-  const seen = new Set();
-
-  const valid = videos.filter(video => {
-    if (!video.title || !video.videoId) return false;
-    if (seen.has(video.videoId)) return false;
-    if (hidden && isVideoHidden(video, hidden)) return false;
-
-    seen.add(video.videoId);
-    return true;
-  });
-
-  const complete = valid.filter(video =>
-    video.metadata &&
-    /views/i.test(video.metadata) &&
-    video.avatar &&
-    video.duration
-  );
-
-  const chosen = [...complete];
-
-  for (const video of valid) {
-    if (chosen.length >= videoCount) break;
-    if (!chosen.some(existing => existing.videoId === video.videoId)) {
-      chosen.push(video);
-    }
-  }
-
-  return chosen.slice(0, videoCount);
-}
-
-/* ---------- WEEKLY LOGIC ---------- */
-
-async function getOrCreateWeeklyVideos() {
-  const settings = await getSettings();
-  const stored = await getStoredWeeklyVideos();
-  const hidden = await getHiddenItems();
-
-  const now = getNow();
+async function renderFromStorage() {
+  const [settings, stored, hidden, statusData] = await Promise.all([
+    getSettings(),
+    getStoredWeeklyVideos(),
+    getHiddenItems(),
+    chrome.storage.local.get(STORAGE_REFRESH_STATUS_KEY)
+  ]);
 
   const storedVideos = Array.isArray(stored.videos) ? stored.videos : [];
-  let storedVisibleVideos = filterHiddenVideos(storedVideos, hidden);
-  if (settings.excludeLiveVideos !== false) {
-    storedVisibleVideos = storedVisibleVideos.filter(v => !videoLooksLive(v));
-  }
-
-  const hasStoredVideos =
+  const hasUsableVideos =
     storedVideos.length > 0 &&
-    storedVideos.every(video =>
-      video?.title &&
-      video?.videoId
-    );
+    storedVideos.every(v => v?.title && v?.videoId);
 
-  const refreshAfter =
-    typeof stored.refreshAfter === "number"
-      ? stored.refreshAfter
-      : getNextRefreshTime(settings);
-
-  const shouldRefresh =
-    !hasStoredVideos ||
-    now >= refreshAfter;
-
-  if (hasStoredVideos && !shouldRefresh) {
-    return storedVisibleVideos.slice(0, settings.videoCount);
+  if (hasUsableVideos) {
+    let visible = filterHiddenVideos(storedVideos, hidden);
+    if (settings.excludeLiveVideos !== false) {
+      visible = visible.filter(v => !videoLooksLive(v));
+    }
+    if (visible.length > 0) {
+      await renderCustomHome(visible.slice(0, settings.videoCount));
+      return;
+    }
+    // Stored videos exist but hidden/live filters emptied them — fall through
+    // to the loader/retry + nudge below rather than painting an empty grid.
   }
 
-  if (isMarkerPage()) {
-    renderRefreshingLoading();
-    sessionStorage.setItem(REFRESH_RETURN_FLAG, "1");
-    let prepared = false;
-    try {
-      const response = await chrome.runtime.sendMessage({ type: "better-feed-prepare-scrape" });
-      prepared = !!response?.ok;
-    } catch (_) {}
-    if (!prepared) {
-      sessionStorage.removeItem(REFRESH_RETURN_FLAG);
-      renderLoadingMessage("Couldn't prepare refresh — try again.");
-      return [];
-    }
-    window.location.href = "https://www.youtube.com/";
-    return [];
-  }
-
-  const inRefreshReturn = sessionStorage.getItem(REFRESH_RETURN_FLAG) === "1";
-
-  const navigateBackIfNeeded = () => {
-    if (sessionStorage.getItem(REFRESH_RETURN_FLAG) === "1") {
-      sessionStorage.removeItem(REFRESH_RETURN_FLAG);
-      // Refresh scrape only runs in Watch mode, so return to its marker.
-      window.location.href = markerUrlForMode(MODE_WATCH);
-      return true;
-    }
-    return false;
-  };
-
-  if (inRefreshReturn) {
+  // No usable grid yet. Pick the loader vs. a quiet retry message from the
+  // background-owned refresh status. We never show a terminal "reload to try
+  // again" error — the background retries on its alarm and the storage
+  // onChanged re-renders us when videos land.
+  const status = statusData[STORAGE_REFRESH_STATUS_KEY];
+  const state = status && status.state;
+  if (state === "error") {
+    renderLoadingMessage("Couldn't load this week's videos — retrying shortly.");
+  } else {
     renderRefreshingLoading();
   }
 
-  const ready = await waitForVideoLinks(settings.videoCount);
-
-  if (!ready) {
-    if (navigateBackIfNeeded()) return [];
-    return [];
+  // Fire-and-forget nudge so the background fetches now even if its event
+  // page was asleep (cold start / first run / SW evicted). Idempotent: the
+  // background's in-flight lock + refresh-due check make a duplicate or
+  // already-fresh call a no-op. One send per load; skip while a refresh is
+  // already in flight. onHomePage's gates guarantee we're in Watch mode with
+  // the extension + weekly home enabled before we get here.
+  if (!requestedEnsureFreshThisLoad && state !== "refreshing") {
+    requestedEnsureFreshThisLoad = true;
+    chrome.runtime.sendMessage({ type: "better-feed-ensure-fresh" }).catch(() => {});
   }
-
-  const candidateCount = Math.max(
-    SCRAPE_CANDIDATE_COUNT,
-    settings.videoCount * 3
-  );
-
-  const scrapedCandidates = scrapeRecommendations(candidateCount, {
-    excludeLive: settings.excludeLiveVideos !== false
-  });
-  const visibleScrapedCandidates = filterHiddenVideos(scrapedCandidates, hidden);
-
-  // Save a buffer beyond videoCount so that if the watch-page enrichment
-  // later flags one of the picks as live (a past stream the home-grid scrape
-  // didn't catch) we still have enough non-live videos to fill the grid.
-  const refreshTargetCount = Math.min(
-    settings.videoCount + REFRESH_BACKFILL_BUFFER,
-    MAX_WEEKLY_VIDEOS
-  );
-
-  const initialVideos = chooseWeeklyVideos(
-    visibleScrapedCandidates,
-    refreshTargetCount,
-    hidden
-  );
-
-  if (initialVideos.length > 0 && !inRefreshReturn) {
-    await renderCustomHome(initialVideos);
-  }
-
-  const enrichedVideos = await enrichVideosFast(initialVideos);
-
-  const videosToSave = enrichedVideos.length > 0 ? enrichedVideos : initialVideos;
-  const nextRefreshAfter = getNextRefreshTime(settings);
-
-  if (videosToSave.length > 0) {
-    await saveWeeklyVideos(videosToSave, nextRefreshAfter);
-  }
-
-  if (navigateBackIfNeeded()) return videosToSave;
-  return videosToSave;
 }
 
 /* ---------- MAIN ---------- */
 
 async function onHomePage() {
-  if (updateInProgress) return;
+  if (updateInProgress) {
+    updatePendingAfterCurrent = true;
+    return;
+  }
   updateInProgress = true;
 
   try {
@@ -2513,6 +1560,17 @@ async function onHomePage() {
       } else {
         renderColdStartLoading();
       }
+      return;
+    }
+
+    if (!modeLoaded) {
+      // Mode has not yet been read from chrome.storage. Never run a
+      // mode-specific render against a stale or null currentMode — this is
+      // the exact window where a Work pick could transiently fall through to
+      // a Watch-only weekly refresh. loadCurrentMode (init) and the mode
+      // onChanged branch both set modeLoaded; a deferred/subsequent update()
+      // re-runs this path once the mode is definitively known.
+      applyMarkerModeClass();
       return;
     }
 
@@ -2541,10 +1599,21 @@ async function onHomePage() {
       return;
     }
 
-    const videos = await getOrCreateWeeklyVideos();
-    await renderCustomHome(videos);
+    // Pure render from storage. The background owns the refresh and writes
+    // videos + STORAGE_REFRESH_STATUS_KEY; this paints whatever's there (grid /
+    // loader / quiet retry) and nudges the background once if a refresh is due.
+    await renderFromStorage();
   } finally {
     updateInProgress = false;
+    // If anything tried to run an update while this one was in-flight, honor
+    // it now — concurrent storage.onChanged events queue up while
+    // renderFromStorage awaits its reads + DOM work, and dropping the pending
+    // request would leave the UI stale.
+    if (updatePendingAfterCurrent) {
+      updatePendingAfterCurrent = false;
+      // Defer to the next microtask so the finally fully unwinds first.
+      Promise.resolve().then(() => onHomePage());
+    }
   }
 }
 
@@ -2605,7 +1674,6 @@ function endColdStart() {
 
 async function maybeReEnterColdStart() {
   if (coldStartActive) return;
-  if (sessionStorage.getItem(REFRESH_RETURN_FLAG) === "1") return;
   if (!(await detectColdStart())) return;
   coldStartActive = true;
   coldStartAwaitingChoice = true;
@@ -2616,6 +1684,10 @@ async function maybeReEnterColdStart() {
     clearTimeout(coldStartTimer);
     coldStartTimer = null;
   }
+  // Also stop any poll timer left over from a prior cold-start session — the
+  // `if (coldStartPollTimer) return` guard in startColdStartPolling prevents
+  // a duplicate but not an orphan still calling hydrateFromSync on a loop.
+  stopColdStartPolling();
   update();
 }
 
@@ -2632,7 +1704,7 @@ function checkColdStartDataReady() {
 }
 
 function renderLoadingMessage(text) {
-  const browse = getHomeBrowse();
+  const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
   removeCustomHome();
@@ -2658,7 +1730,7 @@ function renderRefreshingLoading() {
 }
 
 function renderColdStartSetup() {
-  const browse = getHomeBrowse();
+  const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
   removeCustomHome();
@@ -2793,7 +1865,7 @@ async function applyColdStartSettingsAndContinue(settings) {
 }
 
 function renderColdStartRefreshSchedule() {
-  const browse = getHomeBrowse();
+  const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
   removeCustomHome();
@@ -2847,7 +1919,7 @@ function renderColdStartRefreshSchedule() {
 }
 
 function renderColdStartSyncFailed() {
-  const browse = getHomeBrowse();
+  const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
   removeCustomHome();
@@ -2896,7 +1968,7 @@ function renderColdStartSyncFailed() {
 }
 
 function renderColdStartRefreshCustom() {
-  const browse = getHomeBrowse();
+  const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
   removeCustomHome();
@@ -3282,7 +2354,7 @@ function watchLockDescriptionText() {
 // Returns 0 when there's nothing scheduled.
 function nextWorkSessionTransitionAt() {
   if (!workSession) return 0;
-  const now = Date.now();
+  const now = getNow();
   if (workSession.noTime) {
     const lockStart = lockStartsAt();
     const lockEnd = lockEndsAt();
@@ -3302,7 +2374,7 @@ function scheduleWorkSessionTransitionCheck() {
   if (!next) return;
   // Wake at the transition + 500ms, cap at one minute so a long session
   // re-checks periodically and survives inactive-tab throttling drift.
-  const wait = Math.max(1000, Math.min(next - Date.now() + 500, 60_000));
+  const wait = Math.max(1000, Math.min(next - getNow() + 500, 60_000));
   workSessionTimer = setTimeout(() => {
     handleWorkSessionTransition();
   }, wait);
@@ -3664,7 +2736,6 @@ async function renderSessionLengthSubpicker(inner, { noGrace = false, onBack = n
 
 function maybeShowModePicker() {
   if (coldStartActive) return;
-  if (sessionStorage.getItem(REFRESH_RETURN_FLAG) === "1") return;
   if (!modeLoaded) return;
   if (currentMode && !freshTabAwaitingMode) return;
   renderModePicker();
@@ -3937,10 +3008,7 @@ function showWorkClockPopover() {
 
   document.body.appendChild(popover);
 
-  const rect = clock.getBoundingClientRect();
-  popover.style.position = "fixed";
-  popover.style.top = `${rect.bottom + 8}px`;
-  popover.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+  positionPopoverBelowButton(popover, clock);
 
   // Keep open while the mouse is on the popover, including the gap between
   // the icon and the popover (handled by the hide delay).
@@ -4104,10 +3172,7 @@ function showDailyLimitPopover() {
 
   document.body.appendChild(popover);
 
-  const rect = btn.getBoundingClientRect();
-  popover.style.position = "fixed";
-  popover.style.top = `${rect.bottom + 8}px`;
-  popover.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
+  positionPopoverBelowButton(popover, btn);
 
   // Defer the outside-click listener so the click that opened us doesn't fire it.
   setTimeout(() => {
@@ -4486,7 +3551,7 @@ function formatResetTime(settings) {
 }
 
 function renderSeeYouTomorrow(settings) {
-  const browse = getHomeBrowse();
+  const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
   removeCustomHome();
@@ -4516,7 +3581,7 @@ function renderSeeYouTomorrow(settings) {
 }
 
 function renderWorkPlaceholder() {
-  const browse = getHomeBrowse();
+  const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
   removeCustomHome();
@@ -4581,21 +3646,19 @@ ensureThemeObserver();
   await applyFeatureSettings();
   ensureModeSwitcher();
 
-  const inRefreshFlow = sessionStorage.getItem(REFRESH_RETURN_FLAG) === "1";
-  const coldStart = !inRefreshFlow && (await detectColdStart());
+  const coldStart = await detectColdStart();
   if (coldStart) {
     coldStartActive = true;
     coldStartAwaitingChoice = true;
     update();
-  } else if (!inRefreshFlow) {
+  } else {
     try { await hydrateFromSync(); } catch (_) {}
   }
 
   // Force the picker on freshly-opened YouTube tabs (typed URL, bookmark,
   // external link), but NOT on internal Cmd-click / SPA / reload / back-forward.
-  // Skipped during the refresh-scrape return and during cold start since both
-  // already own the picker's timing.
-  if (!inRefreshFlow && !coldStart && currentMode && isFreshTabNavigation()) {
+  // Skipped during cold start since it already owns the picker's timing.
+  if (!coldStart && currentMode && isFreshTabNavigation()) {
     freshTabAwaitingMode = true;
   }
   if (!coldStartActive) {
@@ -4611,6 +3674,10 @@ ensureThemeObserver();
 })();
 
 async function maybeRedirectSpaHome() {
+  // SPA-navigation safety net: the dNR redirect rule is main_frame-scoped and
+  // does NOT fire on client-side yt-navigate route changes to "/". When the
+  // user lands on the vanilla home via SPA nav, redirect to the marker URL so
+  // the custom home takes over.
   if (location.pathname !== "/") return;
   if (MARKER_HASHES.has(location.hash)) return;
   if (!currentMode) return;
@@ -4618,19 +3685,9 @@ async function maybeRedirectSpaHome() {
   const settings = await getSettings();
   if (!settings.enabled) return;
 
-  // Watch mode has additional gating + a refresh-due bypass so we can
-  // land on vanilla home to scrape recommendations.
   if (currentMode === MODE_WATCH) {
     if (!settings.weeklyHomeEnabled) return;
     if (!settings.redirectHomeEnabled) return;
-
-    const stored = await getStoredWeeklyVideos();
-    const storedVideos = Array.isArray(stored.videos) ? stored.videos : [];
-    const refreshDue =
-      storedVideos.length === 0 ||
-      typeof stored.refreshAfter !== "number" ||
-      getNow() >= stored.refreshAfter;
-    if (refreshDue) return;
   }
 
   window.location.replace(markerUrlForMode(currentMode));
@@ -4696,15 +3753,32 @@ function getActiveVideoEl() {
   );
 }
 
+// Serialize every daily-state read-modify-write. setInterval fires
+// tickWatchTracking every 1s regardless of whether the previous (async) tick
+// finished, so the seconds-flush and the video-count write can interleave
+// across ticks and clobber each other's snapshot (lost watch-seconds or a
+// lost counted videoId). Routing both through one chain makes them atomic
+// w.r.t. each other — same pattern as modifyHidden/modifyWatched.
+let _dailyStateChain = Promise.resolve();
+function queueDailyStateUpdate(fn) {
+  const run = _dailyStateChain.then(() => fn()).catch(() => undefined);
+  _dailyStateChain = run;
+  return run;
+}
+
 async function flushWatchSeconds(settings) {
   if (watchTrackPendingSeconds <= 0) return null;
+  // Capture + zero pending SYNCHRONOUSLY (before any await) so a concurrent
+  // tick can't double-count it; the storage read-modify-write is serialized.
   const pending = watchTrackPendingSeconds;
   watchTrackPendingSeconds = 0;
   watchTrackLastFlushTime = getNow();
-  const state = await getDailyState(settings);
-  state.secondsWatched = (state.secondsWatched || 0) + pending;
-  await saveDailyState(state);
-  return state;
+  return queueDailyStateUpdate(async () => {
+    const state = await getDailyState(settings);
+    state.secondsWatched = (state.secondsWatched || 0) + pending;
+    await saveDailyState(state);
+    return state;
+  });
 }
 
 function resetWatchTrackingState() {
@@ -4809,8 +3883,9 @@ async function tickWatchTracking() {
   let graceJustGranted = false;
   if (!watchTrackVideoCounted && watchTrackPlaybackSeconds >= VIDEO_COUNT_THRESHOLD_SEC) {
     watchTrackVideoCounted = true;
-    const state = await getDailyState(settings);
-    if (!state.videoIds.includes(expectedVideoId)) {
+    graceJustGranted = await queueDailyStateUpdate(async () => {
+      const state = await getDailyState(settings);
+      if (state.videoIds.includes(expectedVideoId)) return false;
       state.videoIds = [...state.videoIds, expectedVideoId];
       await saveDailyState(state);
       if (state.videoIds.length >= settings.maxVideosPerDay) {
@@ -4821,10 +3896,11 @@ async function tickWatchTracking() {
             videoId: expectedVideoId,
             dayKey: getDailyDayKey(settings)
           });
-          graceJustGranted = true;
+          return true;
         }
       }
-    }
+      return false;
+    });
   }
 
   const state = await getDailyState(settings);
@@ -4874,8 +3950,13 @@ const PROGRESS_WRITE_DELTA = 0.01;
 let watchedMarkInterval = null;
 let watchedMarkVideoId = null;
 let watchedMarkLastWrittenFraction = -1;
+let watchedMarkStartGen = 0;
 
 async function maybeStartWatchedMarking() {
+  // Generation guard (same pattern as maybeStartWatchTracking): two rapid
+  // yt-navigate-finish calls each await storage below; without this, both
+  // could reach setInterval and orphan the first interval.
+  const myGen = ++watchedMarkStartGen;
   stopWatchedMarking();
   if (!isWatchModeActive()) return;
   if (location.pathname !== "/watch") return;
@@ -4884,11 +3965,13 @@ async function maybeStartWatchedMarking() {
   // Only auto-mark videos that are on the current week's homepage. Search
   // results, sidebar suggestions, etc. don't get tracked.
   const stored = await getStoredWeeklyVideos();
+  if (myGen !== watchedMarkStartGen) return;
   const inGrid =
     Array.isArray(stored.videos) &&
     stored.videos.some(v => v && v.videoId === videoId);
   if (!inGrid) return;
   const watched = await getWatchedVideos();
+  if (myGen !== watchedMarkStartGen) return;
   if (watched.has(videoId)) return;
   watchedMarkVideoId = videoId;
   watchedMarkInterval = setInterval(tickWatchedMarking, 2000);
@@ -5102,6 +4185,12 @@ async function onGraceChosen(type, seconds) {
   watchTrackLastCurrentTime = null;
   watchTrackPendingSeconds = 0;
   watchTrackLastFlushTime = getNow();
+  // Reset the playback accumulator + counted flag too. The daily-limit-hit
+  // path cleared the interval without resetWatchTrackingState(), so these
+  // carry stale values; leaving them would let the video-count branch
+  // re-fire spuriously and double-count this video on the next tick.
+  watchTrackPlaybackSeconds = 0;
+  watchTrackVideoCounted = false;
   if (!watchTrackInterval) {
     watchTrackInterval = setInterval(() => tickWatchTracking(), 1000);
   }
@@ -5197,6 +4286,11 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
       (Array.isArray(changes[STORAGE_VIDEOS_KEY].newValue) &&
         changes[STORAGE_VIDEOS_KEY].newValue.length === 0));
   if (settingsCleared || videosCleared) {
+    // "Clear local data" wiped the authoritative chrome.storage mode, but the
+    // localStorage mode mirror (origin-scoped to this YouTube tab) survives a
+    // clear initiated from the options page and would otherwise feed early.js
+    // a stale mode on the next load. Zero it here.
+    try { localStorage.removeItem(MODE_LOCALSTORAGE_KEY); } catch (_) {}
     await maybeReEnterColdStart();
   }
 
@@ -5211,6 +4305,12 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
     // Sync hydration / cross-device updates may have brought in stub entries
     // (IDs only) — fill in title/channel from oEmbed in the background.
     rebuildVideoMetadataIfNeeded().catch(() => {});
+  }
+
+  // Background-owned refresh status flipped (idle/refreshing/error) — re-render
+  // so renderFromStorage swaps between the grid, loader, and retry message.
+  if (STORAGE_REFRESH_STATUS_KEY in changes) {
+    update();
   }
 
   if (
@@ -5243,6 +4343,15 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
 
     currentMode = VALID_MODES.includes(newValue) ? newValue : null;
     modeLoaded = true;
+    // Keep the page-origin localStorage mirror (read synchronously by early.js
+    // at document_start) in lockstep with the authoritative chrome.storage
+    // mode — including when the mode is CLEARED (newValue undefined). The
+    // background context can never do this (localStorage is undefined in a
+    // service worker / event page), and "Clear local data" runs from the
+    // options-page origin which cannot touch this tab's localStorage. Without
+    // this line a stale mirror survives a clear and drives early.js into the
+    // wrong mode styling on the next load.
+    syncModeToLocalStorage(currentMode);
 
     // Same-tab mode picks are owned by onModePicked — let it handle the
     // URL update and navigation. If we also ran the in-place updates

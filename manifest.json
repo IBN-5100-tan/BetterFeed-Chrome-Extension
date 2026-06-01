@@ -6,6 +6,12 @@
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt/uwEeH2VSvy88HLMQftJzC2LcK3793JmZ7Hqvm0BzM8MHRHgrOi5jmvZGx3GLZlz9rXv+mL4eo/R5jTU58XA9xp7OegmzGeZDwi7Cj3BV/mNNPZ0X3Wu/y4ojgTXBGI1J4IDVcGrTCTA/A8uvpPPdpj0epgF1H90YmUaTi29GgiSs7sIkPiex70KTfGhJ1fE4P6a8CcfBIkQC2iYXKORqt7Eh4lx8ZOI73ZBSR2i5O8RzFQ2MzGksaeYcbF9PJjFp/Du81GYicFbfMTDZp5apTjlGKGOGFFerGiR9qVWjQo4obk2+xfosHYO+reMo1L3dx5Hwoxh3aUbvMXp0NfIQIDAQAB",
   "permissions": ["storage", "declarativeNetRequest", "alarms"],
   "host_permissions": ["*://www.youtube.com/*"],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "betterfeed@ibn-5100-tan.github.io",
+      "strict_min_version": "121.0"
+    }
+  },
   "action": {
     "default_title": "BetterFeed Settings",
     "default_popup": "popup.html"
@@ -15,7 +21,8 @@
     "open_in_tab": true
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "scripts": ["shared.js", "background.js"]
   },
   "content_scripts": [
     {

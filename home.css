@@ -18,6 +18,8 @@
   --better-feed-additive-bg: #303030;
   --better-feed-menu-bg: #282828;
   --better-feed-hover-bg: rgba(255, 255, 255, 0.1);
+  --better-feed-primary-action: #3ea6ff;
+  --better-feed-primary-action-hover: #2d88cc;
 }
 
 html.better-feed-light-mode {
@@ -141,13 +143,19 @@ html.better-feed-see-you-tomorrow #better-feed-home .better-feed-see-you {
   background: var(--better-feed-hover-bg);
 }
 
+#better-feed-home .better-feed-setup-button:focus-visible,
+#better-feed-home .better-feed-setup-back:focus-visible {
+  outline: 2px solid var(--better-feed-primary-action);
+  outline-offset: 2px;
+}
+
 #better-feed-home .better-feed-setup-button.better-feed-setup-primary {
-  background: #3ea6ff;
+  background: var(--better-feed-primary-action);
   color: #fff;
 }
 
 #better-feed-home .better-feed-setup-button.better-feed-setup-primary:hover {
-  background: #2d88cc;
+  background: var(--better-feed-primary-action-hover);
 }
 
 #better-feed-home .better-feed-setup-back {
@@ -225,7 +233,7 @@ html.better-feed-see-you-tomorrow #better-feed-home .better-feed-see-you {
 }
 
 #better-feed-home .better-feed-setup-radio input[type="radio"] {
-  accent-color: #3ea6ff;
+  accent-color: var(--better-feed-primary-action);
 }
 
 #better-feed-home .better-feed-setup-form select,
@@ -244,7 +252,7 @@ html.better-feed-see-you-tomorrow #better-feed-home .better-feed-see-you {
 #better-feed-home .better-feed-setup-form select:focus,
 #better-feed-home .better-feed-setup-form input[type="number"]:focus {
   outline: none;
-  border-color: #3ea6ff;
+  border-color: var(--better-feed-primary-action);
 }
 
 #better-feed-home .better-feed-setup-time-row {
@@ -279,7 +287,7 @@ html.better-feed-see-you-tomorrow #better-feed-home .better-feed-see-you {
 }
 
 #better-feed-home .better-feed-setup-day-check input[type="checkbox"] {
-  accent-color: #3ea6ff;
+  accent-color: var(--better-feed-primary-action);
 }
 
 #better-feed-home .better-feed-setup-error {
