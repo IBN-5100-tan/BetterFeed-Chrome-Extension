@@ -7,7 +7,7 @@
  *      toggle classes are set on <html> by applyFeatureSettings() in
  *      content.js based on the current settings.
  *   2. The reusable overlay / modal / popover surfaces (mode picker,
- *      work-clock, session-length picker, daily-limit popup, see-you popup,
+ *      work-clock, session-length picker, daily-limit popup,
  *      channel-confirm, unlock challenge, session-ended popup, masthead
  *      switcher chip). These don't need to be conditional — the JS creates
  *      and destroys the DOM nodes they target.
@@ -26,7 +26,9 @@ html.better-feed-hide-shorts ytd-rich-section-renderer:has(ytd-rich-shelf-render
 html.better-feed-hide-shorts ytd-reel-shelf-renderer,
 html.better-feed-hide-shorts ytd-shelf-renderer:has(ytd-reel-item-renderer),
 html.better-feed-hide-shorts ytd-guide-entry-renderer:has(a[title="Shorts"]),
+html.better-feed-hide-shorts ytd-guide-entry-renderer:has(a[href^="/shorts"]),
 html.better-feed-hide-shorts ytd-mini-guide-entry-renderer[aria-label="Shorts"],
+html.better-feed-hide-shorts ytd-mini-guide-entry-renderer:has(a[href^="/shorts"]),
 html.better-feed-hide-shorts ytd-video-renderer:has(a[href*="/shorts/"]),
 html.better-feed-hide-shorts ytd-grid-video-renderer:has(a[href*="/shorts/"]),
 html.better-feed-hide-shorts ytd-rich-item-renderer:has(a[href*="/shorts/"]),
@@ -43,21 +45,22 @@ html.better-feed-hide-watch-recs ytd-watch-next-secondary-results-renderer {
   display: none !important;
 }
 
-html.better-feed-hide-watch-recs ytd-watch-flexy:not(:has(ytd-live-chat-frame)) #secondary.ytd-watch-flexy,
-html.better-feed-hide-watch-recs.better-feed-hide-live-chat #secondary.ytd-watch-flexy,
-html.better-feed-hide-watch-recs.better-feed-hide-watch-side-panel #secondary.ytd-watch-flexy {
+/* Center the player when watch-recs are hidden AND there's no ACTIVE live chat.
+   Cross-browser-correct: content.js's watchLiveChatPresence() toggles
+   better-feed-live-chat-present from the chat frame's real visibility, so this
+   no longer relies on :has(ytd-live-chat-frame) — which mis-fired on Firefox,
+   where an inert chat frame lingers in the DOM on non-live videos. A user-hidden
+   chat (hide-live-chat) collapses the frame to size 0, so it reads as absent
+   here too and the player still centers. */
+html.better-feed-hide-watch-recs:not(.better-feed-live-chat-present) #secondary.ytd-watch-flexy {
   display: none !important;
 }
 
-html.better-feed-hide-watch-recs ytd-watch-flexy:not([theater]):not(:has(ytd-live-chat-frame)) #columns.ytd-watch-flexy,
-html.better-feed-hide-watch-recs.better-feed-hide-live-chat ytd-watch-flexy:not([theater]) #columns.ytd-watch-flexy,
-html.better-feed-hide-watch-recs.better-feed-hide-watch-side-panel ytd-watch-flexy:not([theater]) #columns.ytd-watch-flexy {
+html.better-feed-hide-watch-recs:not(.better-feed-live-chat-present) ytd-watch-flexy:not([theater]) #columns.ytd-watch-flexy {
   justify-content: center !important;
 }
 
-html.better-feed-hide-watch-recs ytd-watch-flexy:not([theater]):not(:has(ytd-live-chat-frame)) #primary.ytd-watch-flexy,
-html.better-feed-hide-watch-recs.better-feed-hide-live-chat ytd-watch-flexy:not([theater]) #primary.ytd-watch-flexy,
-html.better-feed-hide-watch-recs.better-feed-hide-watch-side-panel ytd-watch-flexy:not([theater]) #primary.ytd-watch-flexy {
+html.better-feed-hide-watch-recs:not(.better-feed-live-chat-present) ytd-watch-flexy:not([theater]) #primary.ytd-watch-flexy {
   margin-left: auto !important;
   margin-right: auto !important;
 }
@@ -421,11 +424,15 @@ html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card-desc
   cursor: not-allowed;
 }
 #better-feed-mode-picker .better-feed-mode-card-locked:hover {
-  border-color: rgba(255, 255, 255, 0.12);
-  background: transparent;
+  /* Restore the RESTING card colors so hovering a locked card shows no change.
+     `transparent` revealed the scrim behind the card, reading as a flicker
+     rather than the intended "no reaction". */
+  border-color: #2a2a2a;
+  background: #1f1f1f;
 }
 html.better-feed-light-mode #better-feed-mode-picker .better-feed-mode-card-locked:hover {
-  background: transparent;
+  border-color: #e5e5e5;
+  background: #fff;
 }
 
 #better-feed-mode-picker .better-feed-custom-session-form {

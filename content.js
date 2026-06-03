@@ -85,8 +85,11 @@ let renderToken = 0;
 let _lastDetectedBg = null;
 function detectAndApplyTheme() {
   const bg = getComputedStyle(document.documentElement).backgroundColor;
-  const match = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  const match = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
   if (!match) return;
+  // Ignore a fully transparent background (e.g. the brief pre-theme window):
+  // it parses as rgb 0,0,0 → a false "dark" reading. Keep the last theme.
+  if (match[4] !== undefined && Number(match[4]) === 0) return;
   // Bail if nothing changed. Otherwise the setProperty below rewrites the
   // inline style attribute, which the MutationObserver (attributes:true) sees
   // as a change and re-invokes us — needless churn on every unrelated
@@ -101,7 +104,6 @@ function detectAndApplyTheme() {
   const isLight = luminance > 0.5;
 
   document.documentElement.classList.toggle("better-feed-light-mode", isLight);
-  document.documentElement.style.setProperty("--better-feed-base-bg", bg);
 }
 
 let themeObserverAttached = false;
@@ -279,6 +281,10 @@ async function renderCustomHome(videos, options = {}) {
   const visibleVideos = filterHiddenVideos(videos, hidden);
   const unwatched = visibleVideos.filter(v => !watched.has(v?.videoId));
   const watchedVideos = visibleVideos.filter(v => watched.has(v?.videoId));
+  // No slice here: callers pass the already-truncated weekly set (the first
+  // videoCount saved videos). Hiding/live-filtering removes from that fixed set
+  // and the grid shrinks — we deliberately do NOT backfill from any extra saved
+  // videos, so a hidden video stays gone rather than being replaced by a new one.
   const orderedVideos = [...unwatched, ...watchedVideos];
 
   const container = document.createElement("div");
@@ -320,7 +326,7 @@ async function renderCustomHome(videos, options = {}) {
         : parseDurationString(video?.duration);
     const hasProgress = !isWatched && progressPosition > 0 && progressDuration > 0;
 
-    let href = video.url || (video.videoId ? `https://www.youtube.com/watch?v=${video.videoId}` : "#");
+    let href = video.videoId ? `https://www.youtube.com/watch?v=${video.videoId}` : "#";
     // YouTube's own resume can be flaky on the marker pages, so we pin the
     // seek via the canonical ?t= query param rather than relying on its memory.
     if (hasProgress && href !== "#") {
@@ -502,6 +508,15 @@ async function renderCustomHome(videos, options = {}) {
 
   if (myToken !== renderToken) return;
 
+  // Only the FIRST paint of the custom home resets scroll. A re-render — e.g. a
+  // sibling tab flushing watch progress / daily state into storage fires our
+  // storage.onChanged → update() → renderFromStorage — must keep the user's
+  // scroll position; otherwise a periodic background storage write repeatedly
+  // yanks the page to the top while they're reading further down (seen on
+  // Firefox, where background tabs still run the scroll). The remove→prepend is
+  // synchronous, so skipping scrollTo is enough to preserve the position.
+  const alreadyRendered = !!document.getElementById(CUSTOM_HOME_ID);
+
   removeCustomHome();
   browse.prepend(container);
 
@@ -510,7 +525,7 @@ async function renderCustomHome(videos, options = {}) {
     ensureWeekHeaderListeners();
   });
 
-  if (!options.preserveScroll) {
+  if (!options.preserveScroll && !alreadyRendered) {
     window.scrollTo(0, 0);
   }
 
@@ -578,16 +593,11 @@ function applyThumbnailFallbacks(img, video) {
 }
 
 function getThumbnailCandidates(video) {
-  const videoId = video.videoId || getVideoIdFromUrl(video.url);
+  // All thumbnails derive from the videoId. The parser's higher-res URL is
+  // stripped by slimVideoForStorage before it reaches the renderer, so
+  // video.thumbnail / .pageThumbnail / .url are always absent here.
+  const videoId = video.videoId;
   const candidates = [];
-
-  if (video.pageThumbnail && isThumbnailForVideo(video.pageThumbnail, videoId)) {
-    candidates.push(decodeHtml(video.pageThumbnail));
-  }
-
-  if (video.thumbnail && isThumbnailForVideo(video.thumbnail, videoId)) {
-    candidates.push(decodeHtml(video.thumbnail));
-  }
 
   if (videoId) {
     candidates.push(`https://i.ytimg.com/vi/${videoId}/hq720.jpg`);
@@ -599,14 +609,6 @@ function getThumbnailCandidates(video) {
   }
 
   return [...new Set(candidates.filter(Boolean))];
-}
-
-function isThumbnailForVideo(url, videoId) {
-  if (!url || !videoId) return false;
-
-  const decoded = decodeHtml(url);
-
-  return decoded.includes("i.ytimg.com") && decoded.includes(`/vi/${videoId}/`);
 }
 
 /* ---------- BASIC HELPERS ---------- */
@@ -914,7 +916,19 @@ function formatWeekRange(settings, now = new Date(getNow())) {
 // applyThumbnailFallbacks derives URLs from the videoId.
 
 const VIDEO_METADATA_REBUILD_CONCURRENCY = 4;
+// Cap watch-page metric fetches per video: a private/deleted/region-blocked
+// video (or a sustained network failure) yields no metrics, so without a cap
+// it would be re-fetched (~256 KB each) on every load forever. After this many
+// failed attempts we stamp the video as checked and stop retrying it this cycle.
+const MAX_METRICS_ATTEMPTS = 3;
 let videoMetadataRebuildInFlight = false;
+
+// Serialize the three rebuild phases' read-modify-write against STORAGE_VIDEOS_KEY.
+// titlePhase, metricsPhase and avatarPhase run concurrently and each does a
+// get-map-set on the whole videos array; without serialization the last set()
+// to land silently clobbers the other phases' field merges. Same pattern as the
+// hidden/watched/progress queues in shared.js.
+const enqueueVideoWrite = makeSerialQueue();
 
 // fetchVideoMetadataFromOEmbed lives in shared.js (the popup and options
 // page use the same fetcher).
@@ -1056,6 +1070,24 @@ async function applyVideoMetricsToStorage(metricsByVideoId) {
     if (!v || !v.videoId) return v;
     const m = metricsByVideoId[v.videoId];
     if (!m) return v;
+
+    // Watch page couldn't be scraped this attempt. Count it; after
+    // MAX_METRICS_ATTEMPTS, give up: stamp the check time and resolve the
+    // isLive sentinel to false so the video stops being re-fetched on every
+    // load. We never flip a flag that was already known true.
+    if (m.failed) {
+      const attempts = (v.metricsAttempts || 0) + 1;
+      changed = true;
+      if (attempts >= MAX_METRICS_ATTEMPTS) {
+        return {
+          ...v,
+          metricsAttempts: attempts,
+          membersOnlyCheckedAt: v.membersOnlyCheckedAt || Date.now(),
+          isLive: v.isLive === undefined ? false : v.isLive
+        };
+      }
+      return { ...v, metricsAttempts: attempts };
+    }
 
     let nextDuration = v.duration;
     if (!nextDuration && m.lengthSeconds > 0) {
@@ -1239,7 +1271,7 @@ async function rebuildVideoMetadataIfNeeded() {
           if (meta) results[stub.videoId] = meta;
         });
       await runWithConcurrency(jobs, VIDEO_METADATA_REBUILD_CONCURRENCY);
-      await applyOEmbedResultsToStorage(results);
+      await enqueueVideoWrite(() => applyOEmbedResultsToStorage(results));
       return results;
     })();
 
@@ -1249,13 +1281,17 @@ async function rebuildVideoMetadataIfNeeded() {
     const metricsPhase = (async () => {
       const results = {};
       const jobs = stubs
-        .filter(v => !v.metadata || !v.duration || !v.membersOnlyCheckedAt || v.isLive === undefined)
+        .filter(v =>
+          (!v.metadata || !v.duration || !v.membersOnlyCheckedAt || v.isLive === undefined) &&
+          (v.metricsAttempts || 0) < MAX_METRICS_ATTEMPTS)
         .map(stub => async () => {
           const m = await fetchVideoMetricsFromWatchPage(stub.videoId);
-          if (m) results[stub.videoId] = m;
+          // Record the attempt even on failure so applyVideoMetricsToStorage can
+          // count it and eventually stop re-fetching an unscrapeable video.
+          results[stub.videoId] = m || { failed: true };
         });
       await runWithConcurrency(jobs, VIDEO_METADATA_REBUILD_CONCURRENCY);
-      await applyVideoMetricsToStorage(results);
+      await enqueueVideoWrite(() => applyVideoMetricsToStorage(results));
     })();
 
     // PHASE 3 — channel pages for avatars, deduped by channel URL.
@@ -1275,7 +1311,7 @@ async function rebuildVideoMetadataIfNeeded() {
         if (avatar) results[url] = avatar;
       });
       await runWithConcurrency(jobs, VIDEO_METADATA_REBUILD_CONCURRENCY);
-      await applyAvatarsToStorage(results);
+      await enqueueVideoWrite(() => applyAvatarsToStorage(results));
     })();
 
     await Promise.all([titlePhase, metricsPhase, avatarPhase]);
@@ -1289,13 +1325,17 @@ async function rebuildVideoMetadataIfNeeded() {
 /* ---------- HIDDEN VIDEO / CHANNEL HELPERS ---------- */
 
 function getChannelHideKey(video) {
-  const channelUrl = decodeHtml(video?.channelUrl || "").trim().toLowerCase();
+  // Use shared.js decodeHtmlEntities (not content.js decodeHtml) so this WRITE
+  // key matches what shared.js isVideoHidden derives on the MATCH side — the
+  // two decoders diverge on named entities (é, &nbsp;, …) and would otherwise
+  // produce keys that don't compare equal for a name:-fallback channel.
+  const channelUrl = decodeHtmlEntities(video?.channelUrl || "").trim().toLowerCase();
 
   if (channelUrl) {
     return channelUrl;
   }
 
-  const channelName = decodeHtml(video?.channelName || "").trim().toLowerCase();
+  const channelName = decodeHtmlEntities(video?.channelName || "").trim().toLowerCase();
 
   if (channelName) {
     return `name:${channelName}`;
@@ -1357,9 +1397,10 @@ async function hideChannelAndRefresh(video) {
 async function refreshVisibleVideosAfterHide() {
   if (!isHomePage()) return;
 
-  const [stored, settings] = await Promise.all([
+  const [stored, settings, hidden] = await Promise.all([
     getStoredWeeklyVideos(),
-    getSettings()
+    getSettings(),
+    getHiddenItems()
   ]);
 
   if (!settings.enabled || !settings.weeklyHomeEnabled) {
@@ -1367,34 +1408,25 @@ async function refreshVisibleVideosAfterHide() {
     return;
   }
 
-  let storedVideos = Array.isArray(stored.videos) ? stored.videos : [];
+  const renderable = (Array.isArray(stored.videos) ? stored.videos : []).filter(v => v?.videoId);
+  // Same ordering as renderFromStorage: live-filter the POOL first (so a live
+  // stream is backfilled from the reserve), THEN lock the first videoCount as
+  // the fixed set, THEN hidden-filter (which shrinks, never backfills).
+  let pool = renderable;
   if (settings.excludeLiveVideos !== false) {
-    storedVideos = storedVideos.filter(v => !videoLooksLive(v));
+    pool = pool.filter(v => !videoLooksLive(v));
   }
+  const weeklySet = pool.slice(0, settings.videoCount);
+  const visible = filterHiddenVideos(weeklySet, hidden);
 
-  // If filtering emptied the grid (e.g. every remaining video is live with
-  // excludeLiveVideos on), don't paint an empty grid — hand off to update()
-  // so renderFromStorage shows the loader / retry / nudge as appropriate.
-  if (storedVideos.length === 0) {
+  // The whole weekly set is hidden — hand off to update() so renderFromStorage
+  // shows the loader / retry / nudge rather than an empty grid.
+  if (visible.length === 0) {
     update();
     return;
   }
 
-  await renderCustomHome(
-    storedVideos.slice(0, settings.videoCount),
-    { preserveScroll: true }
-  );
-}
-
-/* ---------- URL HELPERS ---------- */
-
-function getVideoIdFromUrl(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.searchParams.get("v");
-  } catch {
-    return null;
-  }
+  await renderCustomHome(visible, { preserveScroll: true });
 }
 
 /* ---------- METADATA FORMATTING ---------- */
@@ -1411,18 +1443,6 @@ function formatDurationFromSeconds(totalSeconds) {
   }
 
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function formatIsoDuration(value) {
-  const hoursMatch = value.match(/(\d+)H/);
-  const minutesMatch = value.match(/(\d+)M/);
-  const secondsMatch = value.match(/(\d+)S/);
-
-  const hours = hoursMatch ? Number(hoursMatch[1]) : 0;
-  const minutes = minutesMatch ? Number(minutesMatch[1]) : 0;
-  const seconds = secondsMatch ? Number(secondsMatch[1]) : 0;
-
-  return formatDurationFromSeconds(hours * 3600 + minutes * 60 + seconds);
 }
 
 function formatPublishDate(value) {
@@ -1495,22 +1515,33 @@ async function renderFromStorage() {
   ]);
 
   const storedVideos = Array.isArray(stored.videos) ? stored.videos : [];
-  const hasUsableVideos =
-    storedVideos.length > 0 &&
-    storedVideos.every(v => v?.title && v?.videoId);
-
-  if (hasUsableVideos) {
-    let visible = filterHiddenVideos(storedVideos, hidden);
-    if (settings.excludeLiveVideos !== false) {
-      visible = visible.filter(v => !videoLooksLive(v));
-    }
-    if (visible.length > 0) {
-      await renderCustomHome(visible.slice(0, settings.videoCount));
-      return;
-    }
-    // Stored videos exist but hidden/live filters emptied them — fall through
-    // to the loader/retry + nudge below rather than painting an empty grid.
+  // Render every video that has a videoId. A stub whose title hasn't hydrated
+  // yet still shows a videoId-derived thumbnail and fills in its title/metadata
+  // progressively via rebuildVideoMetadataIfNeeded. Gating on EVERY title being
+  // present (the old every() check) would wedge a fully-synced device — whose
+  // grid arrives as all-stubs — on a permanent "Refreshing" loader whenever
+  // oEmbed can't reach YouTube, even though the thumbnails are renderable.
+  const renderable = storedVideos.filter(v => v?.videoId);
+  // 1. Drop live streams from the candidate POOL first, so a late-detected live
+  //    video is BACKFILLED by a fresh one from the over-scrape reserve — we
+  //    always want videoCount watchable videos in place.
+  let pool = renderable;
+  if (settings.excludeLiveVideos !== false) {
+    pool = pool.filter(v => !videoLooksLive(v));
   }
+  // 2. Lock in the FIXED weekly set: the first videoCount of the live-filtered
+  //    pool. 3. Hiding removes from THIS set WITHOUT backfilling — once you have
+  //    your videos for the week, hiding them must not surface new ones until the
+  //    next scheduled refresh.
+  const weeklySet = pool.slice(0, settings.videoCount);
+  const visible = filterHiddenVideos(weeklySet, hidden);
+  if (visible.length > 0) {
+    await renderCustomHome(visible);
+    return;
+  }
+  // No renderable videos yet (cold / refreshing), or the whole weekly set is
+  // hidden — fall through to the loader/retry + nudge below rather than painting
+  // an empty grid.
 
   // No usable grid yet. Pick the loader vs. a quiet retry message from the
   // background-owned refresh status. We never show a terminal "reload to try
@@ -1617,9 +1648,54 @@ async function onHomePage() {
   }
 }
 
+// --- Live-chat presence (drives the watch-recs centering rules) ---
+// On a live video YouTube renders a visible ytd-live-chat-frame; on non-live
+// videos Firefox leaves an INERT (size-0) frame in the DOM while Chromium omits
+// it entirely. A CSS :has(ytd-live-chat-frame) guard therefore mis-fires on
+// Firefox, so we detect REAL visibility here and toggle a class the CSS keys on.
+let liveChatObserver = null;
+let liveChatObserverTimer = null;
+let liveChatRecheckQueued = false;
+
+function updateLiveChatPresence() {
+  const f = document.querySelector("ytd-live-chat-frame");
+  const present = !!(f && f.offsetParent !== null && f.getBoundingClientRect().height > 50);
+  document.documentElement.classList.toggle("better-feed-live-chat-present", present);
+}
+
+function watchLiveChatPresence() {
+  // Re-evaluate now, then watch for the async-loading chat to mount/collapse for
+  // a bounded window (disconnect after 12s so we don't leak an observer). The
+  // rAF gate coalesces YouTube's frequent DOM mutations into one check per frame.
+  updateLiveChatPresence();
+  if (liveChatObserver) liveChatObserver.disconnect();
+  if (liveChatObserverTimer) clearTimeout(liveChatObserverTimer);
+  liveChatObserver = new MutationObserver(() => {
+    if (liveChatRecheckQueued) return;
+    liveChatRecheckQueued = true;
+    requestAnimationFrame(() => {
+      liveChatRecheckQueued = false;
+      updateLiveChatPresence();
+    });
+  });
+  liveChatObserver.observe(document.body, { childList: true, subtree: true });
+  liveChatObserverTimer = setTimeout(() => {
+    if (liveChatObserver) { liveChatObserver.disconnect(); liveChatObserver = null; }
+  }, 12000);
+}
+
+function stopWatchLiveChatPresence() {
+  if (liveChatObserver) { liveChatObserver.disconnect(); liveChatObserver = null; }
+  if (liveChatObserverTimer) { clearTimeout(liveChatObserverTimer); liveChatObserverTimer = null; }
+  document.documentElement.classList.remove("better-feed-live-chat-present");
+}
+
 function onNonHomePage() {
   removeCustomHome();
   markModeReady();
+  // Only watch pages can have live chat; elsewhere clear any stale state.
+  if (location.pathname.startsWith("/watch")) watchLiveChatPresence();
+  else stopWatchLiveChatPresence();
 }
 
 const COLD_START_TIMEOUT_MS = 5000;
@@ -2349,8 +2425,8 @@ function watchLockDescriptionText() {
 }
 
 // Returns the next moment (ms timestamp) when the session UI state changes.
-// For timed: endsAt (session ends → popup). For no-time: 10s mark (lock
-// starts → popover content), 21min mark (lock ends → popover content).
+// For timed: endsAt (session ends → popup). For no-time: 15s mark (lock
+// starts → popover content), ~20m15s mark (lock ends → popover content).
 // Returns 0 when there's nothing scheduled.
 function nextWorkSessionTransitionAt() {
   if (!workSession) return 0;
@@ -2465,7 +2541,6 @@ function tickPickerLockDisplay() {
   } else if (watchCard.classList.contains("better-feed-mode-card-locked")) {
     // Lock just ended — restore the Watch card to its normal state.
     watchCard.classList.remove("better-feed-mode-card-locked");
-    watchCard.disabled = false;
     const watchMeta = MODE_CARDS.find(c => c.id === MODE_WATCH);
     if (watchMeta) desc.textContent = watchMeta.desc;
   }
@@ -3112,7 +3187,7 @@ async function renderDailyLimitPopoverContent(popover) {
   popover.appendChild(title);
 
   const videosWatched = Array.isArray(state.videoIds) ? state.videoIds.length : 0;
-  const secondsWatched = Number(state.secondsWatched) || 0;
+  const secondsWatched = dailyTotalSeconds(state);
   const enabled = !!settings.dailyLimitEnabled;
   const mode = settings.dailyLimitMode || "both";
 
@@ -3213,6 +3288,30 @@ const WORK_UNLOCK_ID = "better-feed-work-unlock";
 // generateUnlockCode lives in shared.js so the work-session unlock and the
 // watching-lock unlock can't drift apart.
 
+let dialogTitleSeq = 0;
+// Make a full-screen overlay behave as an accessible modal dialog: announce it
+// as a dialog, label it by its title, and trap Tab focus inside the card so a
+// keyboard / screen-reader user can't tab past the challenge to the page behind.
+function setupModalDialog(overlay, card, titleEl) {
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  if (titleEl) {
+    if (!titleEl.id) titleEl.id = `better-feed-dialog-title-${++dialogTitleSeq}`;
+    overlay.setAttribute("aria-labelledby", titleEl.id);
+  }
+  overlay.addEventListener("keydown", e => {
+    if (e.key !== "Tab") return;
+    const focusables = card.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+}
+
 function renderWorkUnlockModal({ targetMode } = {}) {
   document.getElementById(WORK_UNLOCK_ID)?.remove();
   // Allow the challenge whenever a session is active — even outside the lock
@@ -3298,6 +3397,7 @@ function renderWorkUnlockModal({ targetMode } = {}) {
     if (e.key === "Escape") overlay.remove();
   });
 
+  setupModalDialog(overlay, card, title);
   (document.body || document.documentElement).appendChild(overlay);
   setTimeout(() => input.focus(), 50);
 }
@@ -3322,7 +3422,7 @@ function showStandaloneSessionLengthPicker() {
   inner.className = "better-feed-mode-picker-inner";
 
   // Sessions started from the clock popover / session-ended popup skip the
-  // 10-second grace window — the user is re-committing mid-Work, no
+  // 15-second grace window — the user is re-committing mid-Work, no
   // fat-finger window required.
   renderSessionLengthSubpicker(inner, {
     noGrace: true,
@@ -3387,6 +3487,7 @@ function showSessionEndedPopup() {
   buttons.appendChild(yesBtn);
   card.appendChild(buttons);
   overlay.appendChild(card);
+  setupModalDialog(overlay, card, title);
   (document.body || document.documentElement).appendChild(overlay);
 }
 
@@ -3766,6 +3867,31 @@ function queueDailyStateUpdate(fn) {
   return run;
 }
 
+// --- Daily-limit cross-device sync (push side) ---
+// The daily state (videos watched + per-device seconds) syncs so the limit
+// roams across devices. Video-count changes and the limit-hit moment push
+// immediately; routine seconds flushes (every ~5s) debounce to ~30s to respect
+// chrome.storage.sync write quota.
+const DAILY_SYNC_DEBOUNCE_MS = 30_000;
+let _lastDailySyncAt = 0;
+let _dailySyncTimer = null;
+
+function scheduleDailyStateSync({ immediate = false } = {}) {
+  if (immediate) {
+    if (_dailySyncTimer) { clearTimeout(_dailySyncTimer); _dailySyncTimer = null; }
+    _lastDailySyncAt = getNow();
+    pushDailyStateToSync().catch(() => {});
+    return;
+  }
+  if (_dailySyncTimer) return;
+  const wait = Math.max(0, DAILY_SYNC_DEBOUNCE_MS - (getNow() - _lastDailySyncAt));
+  _dailySyncTimer = setTimeout(() => {
+    _dailySyncTimer = null;
+    _lastDailySyncAt = getNow();
+    pushDailyStateToSync().catch(() => {});
+  }, wait);
+}
+
 async function flushWatchSeconds(settings) {
   if (watchTrackPendingSeconds <= 0) return null;
   // Capture + zero pending SYNCHRONOUSLY (before any await) so a concurrent
@@ -3773,12 +3899,17 @@ async function flushWatchSeconds(settings) {
   const pending = watchTrackPendingSeconds;
   watchTrackPendingSeconds = 0;
   watchTrackLastFlushTime = getNow();
-  return queueDailyStateUpdate(async () => {
+  const result = await queueDailyStateUpdate(async () => {
     const state = await getDailyState(settings);
-    state.secondsWatched = (state.secondsWatched || 0) + pending;
+    const id = await getDeviceId();
+    state.secondsByDevice = state.secondsByDevice || {};
+    state.secondsByDevice[id] = (state.secondsByDevice[id] || 0) + pending;
     await saveDailyState(state);
     return state;
   });
+  // Routine seconds flush — debounced push (don't burn sync quota every 5s).
+  scheduleDailyStateSync();
+  return result;
 }
 
 function resetWatchTrackingState() {
@@ -3881,8 +4012,10 @@ async function tickWatchTracking() {
   watchTrackPlaybackSeconds += delta;
 
   let graceJustGranted = false;
+  let videoJustCounted = false;
   if (!watchTrackVideoCounted && watchTrackPlaybackSeconds >= VIDEO_COUNT_THRESHOLD_SEC) {
     watchTrackVideoCounted = true;
+    videoJustCounted = true;
     graceJustGranted = await queueDailyStateUpdate(async () => {
       const state = await getDailyState(settings);
       if (state.videoIds.includes(expectedVideoId)) return false;
@@ -3903,18 +4036,35 @@ async function tickWatchTracking() {
     });
   }
 
-  const state = await getDailyState(settings);
-  const projectedSeconds = (state.secondsWatched || 0) + watchTrackPendingSeconds;
-  const limitHit = isDailyLimitHit(
-    { ...state, secondsWatched: projectedSeconds },
-    settings
-  );
+  // Read through the serial chain so this snapshot is consistent with any
+  // in-flight flush. flushWatchSeconds zeroes watchTrackPendingSeconds
+  // synchronously but commits to storage inside the chain, so an UNchained read
+  // here could see the old secondsWatched while pending already excludes those
+  // seconds — a transient under-count. Queuing the read serializes it after the
+  // pending write lands.
+  const state = await queueDailyStateUpdate(() => getDailyState(settings));
+  const myId = await getDeviceId();
+  // Project this device's not-yet-flushed seconds onto its OWN bucket so the
+  // summed cross-device total reflects what we're about to flush.
+  const projectedState = {
+    ...state,
+    secondsByDevice: {
+      ...state.secondsByDevice,
+      [myId]: (state.secondsByDevice?.[myId] || 0) + watchTrackPendingSeconds
+    }
+  };
+  const limitHit = isDailyLimitHit(projectedState, settings);
 
   const shouldFlush =
     limitHit || getNow() - watchTrackLastFlushTime >= WATCH_FLUSH_INTERVAL_MS;
 
   if (shouldFlush) {
     await flushWatchSeconds(settings);
+  }
+  // Propagate promptly when a video is counted or the limit is hit; routine
+  // flushes ride the debounce inside flushWatchSeconds.
+  if (videoJustCounted || limitHit) {
+    scheduleDailyStateSync({ immediate: true });
   }
 
   if (limitHit && !graceJustGranted) {
@@ -3941,7 +4091,7 @@ function redirectToBlockedMarker() {
 /* ---------- AUTO-MARK WATCHED ---------- */
 // Independent of the daily-limit ticker because we want this to work even
 // when daily limits are off. Marks the current /watch video as watched once
-// the player has 60s or less remaining. For videos shorter than 60s, falls
+// the player has 20s or less remaining. For videos shorter than 20s, falls
 // back to the player's `ended` state since the remaining-time rule would
 // otherwise fire immediately at t=0.
 
@@ -4018,9 +4168,9 @@ async function tickWatchedMarking() {
   // Three ways to count as "watched":
   //  - The player itself signals it ended (reliable when it fires, but YouTube
   //    can swap the video before the event lands).
-  //  - 60s or less remaining (the main rule for medium/long videos).
-  //  - ≥ 90% of the duration played (handles short videos where the 60s rule
-  //    can never fire, e.g. a 57-second clip).
+  //  - 20s or less remaining (the main rule for medium/long videos).
+  //  - ≥ 90% of the duration played (handles short videos where the 20s rule
+  //    can never fire, e.g. a 15-second clip).
   const reachedThreshold =
     videoEl.ended ||
     (duration > WATCHED_MARK_REMAINING_THRESHOLD_SEC &&
@@ -4082,6 +4232,7 @@ function showChannelConfirm(targetUrl) {
   card.appendChild(buttons);
   overlay.appendChild(card);
 
+  setupModalDialog(overlay, card, title);
   (document.body || document.documentElement).appendChild(overlay);
 }
 
@@ -4160,6 +4311,7 @@ function showDailyLimitPopup() {
   card.appendChild(sub);
   card.appendChild(buttons);
   overlay.appendChild(card);
+  setupModalDialog(overlay, card, title);
   document.body.appendChild(overlay);
 }
 

@@ -37,6 +37,10 @@ const STORAGE_FAKE_NOW_OFFSET_KEY = "betterFeedFakeNowOffset";
 // it is NEVER synced (transient, per-device) and must stay out of SYNC_KEYS.
 const STORAGE_REFRESH_STATUS_KEY = "betterFeedRefreshStatus";
 const MODE_LOCALSTORAGE_KEY = "betterFeedMode";
+// Stable per-device id (random, local-only, NOT synced and NOT in LEGACY_KEY_MAP).
+// Used to attribute watch-seconds per device in the daily state so a cross-device
+// time limit sums each device's contribution without double-counting.
+const STORAGE_DEVICE_ID_KEY = "betterFeedDeviceId";
 
 // One-shot rebrand migration: the chrome.storage keys and the localStorage
 // mode mirror were originally prefixed ytWeekly* (the project's old name).
@@ -203,12 +207,22 @@ async function clearCurrentMode() {
 }
 
 const MAX_WEEKLY_VIDEOS = 25;
-// Extra videos saved beyond settings.videoCount so render-time filtering of
-// late-detected live streams doesn't shrink the visible grid below target.
+// Over-scrape reserve: the background saves settings.videoCount + this many
+// videos, all non-live / non-hidden AT SAVE TIME. The renderer drops any
+// late-detected live streams from the pool and THEN takes the first videoCount
+// as the week's FIXED set — so a live stream is BACKFILLED by a reserve video
+// (we always want videoCount watchable videos in place). Hiding is different: it
+// removes from the fixed set WITHOUT backfilling, so once your week's videos are
+// in place, hiding them must not surface new ones until the next refresh.
 const REFRESH_BACKFILL_BUFFER = 5;
 // How long a background refresh may hold the "refreshing" status before a new
 // trigger is allowed to supersede it (guards against a wedged in-flight fetch).
 const REFRESH_INFLIGHT_TTL_MS = 60_000;
+// After a failed refresh, suppress re-fetch for this long so a persistently
+// all-live / unparseable home (which throws and never advances refreshAfter)
+// can't re-issue a credentialed GET on every trigger. Kept under the 5-minute
+// alarm period so the alarm still retries once the cooldown elapses.
+const REFRESH_ERROR_COOLDOWN_MS = 120_000;
 
 const DEFAULT_SETTINGS = {
   enabled: true,
@@ -245,6 +259,16 @@ const SYNC_HIDDEN_VIDEOS_CAP = 200;
 const SYNC_HIDDEN_CHANNELS_CAP = 100;
 const SYNC_WATCHED_VIDEOS_CAP = 200;
 
+// Cap a merged hidden/watched id list to MAX_HIDDEN_PER_TYPE (keeping the
+// newest). The sync-merge paths (hydrateLocalFromSync / applySyncChangeToLocal)
+// grow the local list by union, so without this they could push it past the cap
+// that the local writers (persistHiddenState / modifyWatched) enforce.
+function capSyncedIdList(list) {
+  return list.length > MAX_HIDDEN_PER_TYPE
+    ? list.slice(list.length - MAX_HIDDEN_PER_TYPE)
+    : list;
+}
+
 const SYNC_KEYS = [
   SETTINGS_KEY,
   STORAGE_VIDEOS_KEY,
@@ -254,7 +278,10 @@ const SYNC_KEYS = [
   // STORAGE_HIDDEN_METADATA_KEY intentionally NOT synced — recovered on the
   // options/popup page via the YouTube oEmbed backfill (saves ~8 KB).
   STORAGE_WATCHED_VIDEOS_KEY,
-  STORAGE_PROGRESS_KEY
+  STORAGE_PROGRESS_KEY,
+  // Daily limit progress roams across devices (merged as a CRDT — see
+  // mergeDailyState) so the limit can't be bypassed by switching devices.
+  STORAGE_DAILY_STATE_KEY
 ];
 
 // Channel keys are stored locally as full URLs (e.g.,
@@ -303,7 +330,20 @@ async function safeSyncRemove(keys) {
 }
 
 async function priorityWriteSync(items, priority) {
-  if (await safeSyncSet(items)) return true;
+  // First attempt inline so we can inspect the error: ONLY a quota failure is
+  // fixable by evicting lower-priority keys. A transient/offline/non-quota
+  // failure can't be helped by deleting synced data, so bail without evicting
+  // (the old code evicted on any failure, needlessly destroying synced data).
+  try {
+    await chrome.storage.sync.set(items);
+    return true;
+  } catch (err) {
+    if (!isQuotaError(err)) {
+      console.warn("sync set failed", err);
+      return false;
+    }
+  }
+  // Quota exceeded — evict lower-priority keys and retry.
   // Defensive: evicting a key that the payload is about to re-write does
   // nothing for the quota — the same bytes go right back. Drop any
   // evict-list entry that overlaps the payload before we waste a round-trip.
@@ -341,7 +381,10 @@ async function fetchVideoMetadataFromOEmbed(videoId) {
   try {
     const target = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
     const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(target)}&format=json`;
-    const resp = await fetch(url);
+    // credentials:"omit" — the oEmbed endpoint is public and needs no auth, and
+    // from the content script (same-origin on youtube.com) a bare fetch would
+    // otherwise send the user's login cookies. Matches the watch/channel fetches.
+    const resp = await fetch(url, { credentials: "omit" });
     if (!resp.ok) return null;
     const data = await resp.json();
     if (!data || typeof data !== "object") return null;
@@ -511,8 +554,57 @@ function getDailyDayKey(settings, now = new Date(getNow())) {
   return `${d.getFullYear()}-${month}-${day}`;
 }
 
+let _deviceIdCache = null;
+async function getDeviceId() {
+  if (_deviceIdCache) return _deviceIdCache;
+  try {
+    const data = await chrome.storage.local.get([STORAGE_DEVICE_ID_KEY]);
+    let id = data[STORAGE_DEVICE_ID_KEY];
+    if (typeof id !== "string" || !id) {
+      id = "dev-" + (typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${getNow()}-${Math.floor(Math.random() * 1e9)}`);
+      await chrome.storage.local.set({ [STORAGE_DEVICE_ID_KEY]: id });
+    }
+    _deviceIdCache = id;
+    return id;
+  } catch (_) {
+    // Storage hiccup — use an ephemeral id so per-device accounting still works
+    // this session rather than throwing in the watch-tracking path.
+    if (!_deviceIdCache) _deviceIdCache = "dev-ephemeral";
+    return _deviceIdCache;
+  }
+}
+
 function emptyDailyState(dayKey) {
-  return { dayKey, videoIds: [], secondsWatched: 0 };
+  return { dayKey, videoIds: [], secondsByDevice: {} };
+}
+
+// Sum the per-device watch-seconds. Falls back to the pre-sync single-counter
+// shape (secondsWatched) so a state read mid-migration still reports correctly.
+function dailyTotalSeconds(state) {
+  if (!state) return 0;
+  const map = state.secondsByDevice;
+  if (map && typeof map === "object") {
+    let total = 0;
+    for (const v of Object.values(map)) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) total += n;
+    }
+    return total;
+  }
+  const legacy = Number(state.secondsWatched);
+  return Number.isFinite(legacy) && legacy > 0 ? legacy : 0;
+}
+
+function sanitizeSecondsMap(map) {
+  if (!map || typeof map !== "object") return null;
+  const out = {};
+  for (const [k, v] of Object.entries(map)) {
+    const n = Number(v);
+    if (k && Number.isFinite(n) && n > 0) out[k] = n;
+  }
+  return out;
 }
 
 async function getDailyState(settings) {
@@ -522,11 +614,17 @@ async function getDailyState(settings) {
   if (!stored || stored.dayKey !== todayKey) {
     return emptyDailyState(todayKey);
   }
-  return {
-    dayKey: stored.dayKey,
-    videoIds: Array.isArray(stored.videoIds) ? stored.videoIds : [],
-    secondsWatched: typeof stored.secondsWatched === "number" ? stored.secondsWatched : 0
-  };
+  const videoIds = Array.isArray(stored.videoIds) ? stored.videoIds : [];
+  let secondsByDevice = sanitizeSecondsMap(stored.secondsByDevice);
+  if (!secondsByDevice) {
+    // Migrate the pre-sync single-counter shape: attribute existing local watch
+    // time to THIS device's bucket so it sums/merges correctly from here on.
+    const legacy = Number(stored.secondsWatched);
+    secondsByDevice = Number.isFinite(legacy) && legacy > 0
+      ? { [await getDeviceId()]: legacy }
+      : {};
+  }
+  return { dayKey: stored.dayKey, videoIds, secondsByDevice };
 }
 
 async function saveDailyState(state) {
@@ -537,7 +635,7 @@ function isDailyLimitHit(state, settings) {
   if (!settings.dailyLimitEnabled) return false;
   const mode = settings.dailyLimitMode || "both";
   if (mode !== "time" && (state.videoIds?.length || 0) >= settings.maxVideosPerDay) return true;
-  if (mode !== "videos" && (state.secondsWatched || 0) >= settings.maxSecondsPerDay) return true;
+  if (mode !== "videos" && dailyTotalSeconds(state) >= settings.maxSecondsPerDay) return true;
   return false;
 }
 
@@ -546,6 +644,36 @@ function isDailyVideoQuotaReached(state, settings) {
   const mode = settings.dailyLimitMode || "both";
   if (mode === "time") return false;
   return (state.videoIds?.length || 0) >= settings.maxVideosPerDay;
+}
+
+// CRDT merge for the daily state across devices. Different day-keys: the later
+// day wins outright (a new day cleanly resets everyone). Same day: union the
+// videoIds (a video watched on any device counts once) and take the max of each
+// device's seconds bucket — each device only ever increments its OWN bucket, so
+// max is that device's latest value, and summing the buckets gives the true
+// cross-device total (so the time limit can't be bypassed by switching devices).
+function mergeDailyState(a, b) {
+  if (!a || typeof a !== "object") return (b && typeof b === "object") ? b : null;
+  if (!b || typeof b !== "object") return a;
+  if (a.dayKey !== b.dayKey) {
+    return String(b.dayKey) > String(a.dayKey) ? b : a;
+  }
+  const videoIds = [...new Set([
+    ...(Array.isArray(a.videoIds) ? a.videoIds : []),
+    ...(Array.isArray(b.videoIds) ? b.videoIds : [])
+  ])];
+  const secondsByDevice = {};
+  for (const src of [a.secondsByDevice, b.secondsByDevice]) {
+    if (src && typeof src === "object") {
+      for (const [k, v] of Object.entries(src)) {
+        const n = Number(v);
+        if (k && Number.isFinite(n) && n > 0) {
+          secondsByDevice[k] = Math.max(secondsByDevice[k] || 0, n);
+        }
+      }
+    }
+  }
+  return { dayKey: a.dayKey, videoIds, secondsByDevice };
 }
 
 async function getDailyGrace(settings) {
@@ -601,7 +729,7 @@ async function getSettings() {
 //  - Timed: `{ startedAt, endsAt, durationMinutes }` — Watch is locked until
 //    endsAt. Session ends automatically when endsAt is reached.
 //  - No-time: `{ startedAt, noTime: true }` — session has no end. Watch lock
-//    is dynamic: a 10-second grace period after startedAt where the user can
+//    is dynamic: a 15-second grace period after startedAt where the user can
 //    still bail, then a 20-minute lock window, then no lock (session itself
 //    keeps running until the user manually ends it).
 // Stored local-only — the session is a per-device focus state, not
@@ -620,7 +748,7 @@ async function setWorkSession({ minutes, noTime, noGrace } = {}) {
   const startedAt = getNow();
   if (noTime) {
     const session = { startedAt, noTime: true };
-    // No-grace sessions skip the 10-second grace window — the Watch lock
+    // No-grace sessions skip the 15-second grace window — the Watch lock
     // kicks in immediately. Used when starting a new session from the clock
     // popover or session-ended popup (i.e., the user is re-committing
     // mid-Work, no fat-finger window required).
@@ -1087,14 +1215,15 @@ async function hydrateFromSync() {
     STORAGE_HIDDEN_VIDEOS_KEY,
     STORAGE_HIDDEN_CHANNELS_KEY,
     STORAGE_WATCHED_VIDEOS_KEY,
-    STORAGE_PROGRESS_KEY
+    STORAGE_PROGRESS_KEY,
+    STORAGE_DAILY_STATE_KEY
   ]);
 
   if (Array.isArray(sync[STORAGE_HIDDEN_VIDEOS_KEY])) {
     const localList = Array.isArray(localLists[STORAGE_HIDDEN_VIDEOS_KEY])
       ? localLists[STORAGE_HIDDEN_VIDEOS_KEY]
       : [];
-    updates[STORAGE_HIDDEN_VIDEOS_KEY] = mergeHiddenIds(localList, sync[STORAGE_HIDDEN_VIDEOS_KEY]);
+    updates[STORAGE_HIDDEN_VIDEOS_KEY] = capSyncedIdList(mergeHiddenIds(localList, sync[STORAGE_HIDDEN_VIDEOS_KEY]));
   }
   if (Array.isArray(sync[STORAGE_HIDDEN_CHANNELS_KEY])) {
     const localList = Array.isArray(localLists[STORAGE_HIDDEN_CHANNELS_KEY])
@@ -1102,13 +1231,13 @@ async function hydrateFromSync() {
       : [];
     // Expand any sync-shrunk channel keys back to full URLs before merging.
     const incoming = sync[STORAGE_HIDDEN_CHANNELS_KEY].map(expandChannelKey);
-    updates[STORAGE_HIDDEN_CHANNELS_KEY] = mergeHiddenIds(localList, incoming);
+    updates[STORAGE_HIDDEN_CHANNELS_KEY] = capSyncedIdList(mergeHiddenIds(localList, incoming));
   }
   if (Array.isArray(sync[STORAGE_WATCHED_VIDEOS_KEY])) {
     const localList = Array.isArray(localLists[STORAGE_WATCHED_VIDEOS_KEY])
       ? localLists[STORAGE_WATCHED_VIDEOS_KEY]
       : [];
-    updates[STORAGE_WATCHED_VIDEOS_KEY] = mergeHiddenIds(localList, sync[STORAGE_WATCHED_VIDEOS_KEY]);
+    updates[STORAGE_WATCHED_VIDEOS_KEY] = capSyncedIdList(mergeHiddenIds(localList, sync[STORAGE_WATCHED_VIDEOS_KEY]));
   }
   if (sync[STORAGE_PROGRESS_KEY] && typeof sync[STORAGE_PROGRESS_KEY] === "object") {
     const localMap =
@@ -1116,6 +1245,16 @@ async function hydrateFromSync() {
         ? localLists[STORAGE_PROGRESS_KEY]
         : {};
     updates[STORAGE_PROGRESS_KEY] = mergeProgressMaps(localMap, sync[STORAGE_PROGRESS_KEY]);
+  }
+  if (sync[STORAGE_DAILY_STATE_KEY] && typeof sync[STORAGE_DAILY_STATE_KEY] === "object") {
+    const localDaily =
+      localLists[STORAGE_DAILY_STATE_KEY] && typeof localLists[STORAGE_DAILY_STATE_KEY] === "object"
+        ? localLists[STORAGE_DAILY_STATE_KEY]
+        : null;
+    const merged = mergeDailyState(localDaily, sync[STORAGE_DAILY_STATE_KEY]);
+    if (merged && JSON.stringify(merged) !== JSON.stringify(localDaily)) {
+      updates[STORAGE_DAILY_STATE_KEY] = merged;
+    }
   }
 
   if (Object.keys(updates).length > 0) {
@@ -1133,7 +1272,8 @@ async function pushLocalToSyncIfMissing(sync) {
     STORAGE_HIDDEN_VIDEOS_KEY,
     STORAGE_HIDDEN_CHANNELS_KEY,
     STORAGE_WATCHED_VIDEOS_KEY,
-    STORAGE_PROGRESS_KEY
+    STORAGE_PROGRESS_KEY,
+    STORAGE_DAILY_STATE_KEY
   ]);
 
   const toPush = {};
@@ -1180,12 +1320,40 @@ async function pushLocalToSyncIfMissing(sync) {
   ) {
     toPush[STORAGE_PROGRESS_KEY] = local[STORAGE_PROGRESS_KEY];
   }
+  // Daily state: push the merge of local ∪ sync whenever it differs from sync,
+  // so this device's progress reaches sync (covers both "sync missing it" and
+  // "local has watch-seconds/videos sync doesn't").
+  {
+    const localDaily = local[STORAGE_DAILY_STATE_KEY];
+    const syncDaily = sync[STORAGE_DAILY_STATE_KEY];
+    if (localDaily && typeof localDaily === "object" && localDaily.dayKey) {
+      const merged = mergeDailyState(typeof syncDaily === "object" ? syncDaily : null, localDaily);
+      if (merged && JSON.stringify(merged) !== JSON.stringify(syncDaily)) {
+        toPush[STORAGE_DAILY_STATE_KEY] = merged;
+      }
+    }
+  }
 
   if (Object.keys(toPush).length > 0) {
     await priorityWriteSync(toPush, {
       evictKeysInOrder: [STORAGE_HIDDEN_CHANNELS_KEY, STORAGE_HIDDEN_VIDEOS_KEY]
     });
   }
+}
+
+// Push the local daily state to sync — called debounced/immediately from the
+// watch tab (see content.js scheduleDailyStateSync). Reads the latest local
+// value so a debounced call ships current data.
+async function pushDailyStateToSync() {
+  try {
+    const data = await chrome.storage.local.get([STORAGE_DAILY_STATE_KEY]);
+    const state = data[STORAGE_DAILY_STATE_KEY];
+    if (!state || typeof state !== "object" || !state.dayKey) return;
+    await priorityWriteSync(
+      { [STORAGE_DAILY_STATE_KEY]: state },
+      { evictKeysInOrder: [STORAGE_VIDEOS_KEY, STORAGE_WATCHED_VIDEOS_KEY, STORAGE_PROGRESS_KEY] }
+    );
+  } catch (_) {}
 }
 
 // Serialize sync->local reconciliation. applySyncChangeToLocal does a
@@ -1259,12 +1427,17 @@ async function applySyncChangeToLocal(changes) {
     changes[STORAGE_PROGRESS_KEY] &&
     changes[STORAGE_PROGRESS_KEY].newValue &&
     typeof changes[STORAGE_PROGRESS_KEY].newValue === "object";
+  const dailyStateIncoming =
+    changes[STORAGE_DAILY_STATE_KEY] &&
+    changes[STORAGE_DAILY_STATE_KEY].newValue &&
+    typeof changes[STORAGE_DAILY_STATE_KEY].newValue === "object";
 
   const readKeys = [...candidateKeys];
   if (hiddenVideosIncoming) readKeys.push(STORAGE_HIDDEN_VIDEOS_KEY);
   if (hiddenChannelsIncoming) readKeys.push(STORAGE_HIDDEN_CHANNELS_KEY);
   if (watchedVideosIncoming) readKeys.push(STORAGE_WATCHED_VIDEOS_KEY);
   if (progressIncoming) readKeys.push(STORAGE_PROGRESS_KEY);
+  if (dailyStateIncoming) readKeys.push(STORAGE_DAILY_STATE_KEY);
   if (readKeys.length === 0) return;
 
   const local = await chrome.storage.local.get(readKeys);
@@ -1280,7 +1453,7 @@ async function applySyncChangeToLocal(changes) {
     const localList = Array.isArray(local[STORAGE_HIDDEN_VIDEOS_KEY])
       ? local[STORAGE_HIDDEN_VIDEOS_KEY]
       : [];
-    const merged = mergeHiddenIds(localList, changes[STORAGE_HIDDEN_VIDEOS_KEY].newValue);
+    const merged = capSyncedIdList(mergeHiddenIds(localList, changes[STORAGE_HIDDEN_VIDEOS_KEY].newValue));
     if (merged.length !== localList.length) {
       updates[STORAGE_HIDDEN_VIDEOS_KEY] = merged;
     }
@@ -1291,7 +1464,7 @@ async function applySyncChangeToLocal(changes) {
       : [];
     // Expand sync-shrunk channel keys back to full URLs before merging.
     const incoming = changes[STORAGE_HIDDEN_CHANNELS_KEY].newValue.map(expandChannelKey);
-    const merged = mergeHiddenIds(localList, incoming);
+    const merged = capSyncedIdList(mergeHiddenIds(localList, incoming));
     if (merged.length !== localList.length) {
       updates[STORAGE_HIDDEN_CHANNELS_KEY] = merged;
     }
@@ -1300,7 +1473,7 @@ async function applySyncChangeToLocal(changes) {
     const localList = Array.isArray(local[STORAGE_WATCHED_VIDEOS_KEY])
       ? local[STORAGE_WATCHED_VIDEOS_KEY]
       : [];
-    const merged = mergeHiddenIds(localList, changes[STORAGE_WATCHED_VIDEOS_KEY].newValue);
+    const merged = capSyncedIdList(mergeHiddenIds(localList, changes[STORAGE_WATCHED_VIDEOS_KEY].newValue));
     if (merged.length !== localList.length) {
       updates[STORAGE_WATCHED_VIDEOS_KEY] = merged;
     }
@@ -1313,6 +1486,16 @@ async function applySyncChangeToLocal(changes) {
     const merged = mergeProgressMaps(localMap, changes[STORAGE_PROGRESS_KEY].newValue);
     if (JSON.stringify(merged) !== JSON.stringify(localMap)) {
       updates[STORAGE_PROGRESS_KEY] = merged;
+    }
+  }
+  if (dailyStateIncoming) {
+    const localDaily =
+      local[STORAGE_DAILY_STATE_KEY] && typeof local[STORAGE_DAILY_STATE_KEY] === "object"
+        ? local[STORAGE_DAILY_STATE_KEY]
+        : null;
+    const merged = mergeDailyState(localDaily, changes[STORAGE_DAILY_STATE_KEY].newValue);
+    if (merged && JSON.stringify(merged) !== JSON.stringify(localDaily)) {
+      updates[STORAGE_DAILY_STATE_KEY] = merged;
     }
   }
 
@@ -1384,8 +1567,13 @@ function parseLockupViewModel(lockup) {
         channelUrl = normalizeRelativeYouTubeUrl(handleUrl);
         continue;
       }
-      if (!views && /views|watching/i.test(text)) { views = text; continue; }
-      if (!date && /ago|streamed|premiered|premieres/i.test(text)) {
+      // Require a digit so a channel byline that fell through the URL-gated
+      // branch above (a channel row YouTube shipped without a tap URL) can't be
+      // misread as a stat — e.g. a channel named "Chicago" matching /ago/ or
+      // "Tech Reviews" matching /views/. Real view/date strings always carry a
+      // number ("1.2M views", "3 days ago", "Premiered Jan 5, 2024").
+      if (!views && /\d/.test(text) && /views|watching/i.test(text)) { views = text; continue; }
+      if (!date && /\d/.test(text) && /ago|streamed|premiered|premieres/i.test(text)) {
         date = text;
         continue;
       }
@@ -1411,13 +1599,6 @@ function parseLockupViewModel(lockup) {
   const isLive = /^(LIVE|PREMIERE|UPCOMING)$/i.test(durationText);
   const duration = isLive ? "" : durationText;
 
-  const imgSources = lockup.contentImage?.thumbnailViewModel?.image?.sources || [];
-  const bestThumb = imgSources.reduce(
-    (a, b) => ((b?.width || 0) > (a?.width || 0) ? b : a),
-    null
-  );
-  const thumbnail = bestThumb?.url || "";
-
   const avatarSources =
     meta.image?.decoratedAvatarViewModel?.avatar?.avatarViewModel?.image?.sources || [];
   const avatar = avatarSources[0]?.url || "";
@@ -1425,9 +1606,6 @@ function parseLockupViewModel(lockup) {
   return {
     videoId,
     title,
-    url: `https://www.youtube.com/watch?v=${videoId}`,
-    thumbnail,
-    pageThumbnail: "",
     duration,
     channelName,
     channelUrl,

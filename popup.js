@@ -60,26 +60,37 @@ function buildHiddenItemRow({ type, id, badgeText, badgeClass, displayText }) {
 async function backfillMissingHiddenVideoMetadata() {
   const { videos, metadata } = await getHiddenItemsWithMetadata();
   const existing = metadata || {};
-  const missing = [...videos].filter(id => id && !existing[id]?.title);
+  // Skip ids already known to have no oEmbed data (deleted/private/age-gated).
+  // Without this negative cache they'd be re-fetched on every loadHiddenItems().
+  const missing = [...videos].filter(id => id && !existing[id]?.title && !existing[id]?._oembedFailed);
   if (missing.length === 0) return;
 
   const fetched = {};
+  const failed = [];
   for (let i = 0; i < missing.length; i += OEMBED_CONCURRENCY) {
     const batch = missing.slice(i, i + OEMBED_CONCURRENCY);
     const results = await Promise.all(batch.map(fetchVideoMetadataFromOEmbed));
     for (let j = 0; j < batch.length; j++) {
       if (results[j]) fetched[batch[j]] = results[j];
+      else failed.push(batch[j]);
     }
   }
-  if (Object.keys(fetched).length === 0) return;
+  if (Object.keys(fetched).length === 0 && failed.length === 0) return;
 
   await modifyHidden(state => {
     if (!state.metadata) state.metadata = {};
     for (const [id, m] of Object.entries(fetched)) {
       if (!state.metadata[id]?.title) state.metadata[id] = { type: "video", ...m };
     }
+    // Negative cache: mark definitively-unavailable ids so they aren't retried.
+    // Cleared automatically when the item is unhidden (its metadata is deleted).
+    for (const id of failed) {
+      if (!state.metadata[id]?.title) {
+        state.metadata[id] = { ...(state.metadata[id] || {}), type: "video", title: "", _oembedFailed: true };
+      }
+    }
   });
-  await loadHiddenItems();
+  if (Object.keys(fetched).length > 0) await loadHiddenItems();
 }
 
 // channelDisplayFromKey lives in shared.js (shared with options.js).
@@ -111,7 +122,11 @@ async function loadHiddenItems() {
     const displayName = meta?.channelName
       ? meta.channelName
       : fallback
-        || (channelKey.startsWith("name:") ? channelKey.slice(5) : channelKey);
+        || (channelKey.startsWith("name:")
+            ? channelKey.slice(5)
+            // Last resort: show the final path segment of a URL-form key rather
+            // than the whole raw https URL (e.g. legacy /c/<name> with no handle).
+            : (channelKey.split("/").filter(Boolean).pop() || "Hidden channel"));
 
     list.appendChild(buildHiddenItemRow({
       type: "channel",
@@ -173,8 +188,25 @@ document.addEventListener("click", async event => {
   }
 });
 
+// Re-render the Hidden Items list if a sync hydrate (or any other context)
+// changes the hidden keys while the popup is open and showing that view —
+// otherwise a mid-open sync merge leaves a stale list until the user re-clicks.
+// (Only the hide/unhide keys; the metadata backfill re-renders itself.)
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  const hiddenContent = document.getElementById("hidden-content");
+  if (!hiddenContent || !hiddenContent.classList.contains("active")) return;
+  if (STORAGE_HIDDEN_VIDEOS_KEY in changes || STORAGE_HIDDEN_CHANNELS_KEY in changes) {
+    loadHiddenItems();
+  }
+});
+
 (async () => {
-  await migrateLegacyStorageKeys();
-  await hydrateFromSync();
+  // Best-effort: a sync-reconciliation failure shouldn't surface as an unhandled
+  // rejection in the popup (matches the .catch() on the backfill call).
+  try {
+    await migrateLegacyStorageKeys();
+    await hydrateFromSync();
+  } catch (_) {}
 })();
 

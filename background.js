@@ -57,40 +57,47 @@ function isRefreshDue(refreshState) {
   return getNow() >= refreshState.refreshAfter;
 }
 
-// The redirect rule is installed whenever the user is in Watch mode with the
-// extension + weekly home + home-redirect all enabled. It is intentionally
-// DECOUPLED from refresh-due state: the background refreshes the grid in place
-// (no navigation), so youtube.com should always land on the marker URL and let
-// content.js render the (possibly stale, soon-refreshed) grid — never flash the
-// native home just because a refresh is due.
+// The redirect rule is installed whenever the extension is enabled. In Watch
+// mode it additionally requires weekly home + home-redirect to be enabled;
+// Work/Listen/no-mode redirect to their own marker URL on `enabled` alone. It
+// is intentionally DECOUPLED from refresh-due state: the background refreshes
+// the grid in place (no navigation), so youtube.com should always land on the
+// marker URL and let content.js render the (possibly stale, soon-refreshed)
+// grid — never flash the native home just because a refresh is due.
 async function updateRedirectRule() {
-  await loadFakeNowOffset();
-  const settings = await getSettings();
-  const mode = await getCurrentMode();
-
-  let shouldRedirect = settings.enabled;
-  if (shouldRedirect && mode === MODE_WATCH) {
-    shouldRedirect = settings.weeklyHomeEnabled && settings.redirectHomeEnabled;
-  }
-
-  const addRules = shouldRedirect
-    ? [
-        {
-          id: REDIRECT_RULE_ID,
-          priority: 1,
-          action: {
-            type: "redirect",
-            redirect: { url: markerUrlForMode(mode) }
-          },
-          condition: {
-            regexFilter: "^https://www\\.youtube\\.com/?(\\?.*)?$",
-            resourceTypes: ["main_frame"]
-          }
-        }
-      ]
-    : [];
-
+  // Whole body guarded: getSettings()/getCurrentMode() read chrome.storage and
+  // can reject transiently; this runs fire-and-forget from onChanged/alarms, so
+  // an unguarded reject would surface as an unhandled rejection.
   try {
+    await loadFakeNowOffset();
+    const settings = await getSettings();
+    const mode = await getCurrentMode();
+
+    let shouldRedirect = settings.enabled;
+    if (shouldRedirect && mode === MODE_WATCH) {
+      shouldRedirect = settings.weeklyHomeEnabled && settings.redirectHomeEnabled;
+    }
+
+    const addRules = shouldRedirect
+      ? [
+          {
+            id: REDIRECT_RULE_ID,
+            priority: 1,
+            action: {
+              type: "redirect",
+              redirect: { url: markerUrlForMode(mode) }
+            },
+            condition: {
+              // https? so a typed/bookmarked http://youtube.com (rare; YouTube
+              // is HSTS-preloaded) is still redirected, matching the manifest's
+              // *://www.youtube.com/* host scope.
+              regexFilter: "^https?://www\\.youtube\\.com/?(\\?.*)?$",
+              resourceTypes: ["main_frame"]
+            }
+          }
+        ]
+      : [];
+
     await chrome.declarativeNetRequest.updateDynamicRules({
       removeRuleIds: [REDIRECT_RULE_ID],
       addRules
@@ -290,6 +297,20 @@ async function runRefresh(reason) {
     return;
   }
 
+  // Error backoff: after a failed refresh, don't re-fetch on the very next
+  // trigger. An all-live or unparseable home throws below and never advances
+  // refreshAfter, so without this it would re-issue a credentialed GET on
+  // every alarm/storage-change/reload nudge. The 5-minute alarm still retries
+  // once this cooldown elapses (cooldown < alarm period).
+  if (
+    status &&
+    status.state === "error" &&
+    typeof status.failedAt === "number" &&
+    getNow() - status.failedAt < REFRESH_ERROR_COOLDOWN_MS
+  ) {
+    return;
+  }
+
   try {
     // Inside the try so a failing status write also lands in the catch's
     // "error" branch — otherwise it could reject to a fire-and-forget caller
@@ -300,7 +321,11 @@ async function runRefresh(reason) {
     const hidden = await getHiddenItems();
     let visible = filterHiddenVideos(parsed, hidden);
     if (settings.excludeLiveVideos !== false) {
-      visible = visible.filter(v => !v.isLive);
+      // Use the same predicate the renderer uses (content.js videoLooksLive),
+      // not just the raw isLive badge flag — otherwise past-live VODs/premieres
+      // the badge missed get saved, then silently dropped at render time,
+      // shrinking the visible grid below videoCount.
+      visible = visible.filter(v => !videoLooksLive(v));
     }
     const target = Math.min(
       settings.videoCount + REFRESH_BACKFILL_BUFFER,

@@ -180,11 +180,12 @@ Key responsibilities:
   open-ended (`startedAt`, `noTime: true`); see `setWorkSession` for the
   `noGrace` flag.
 - **Hidden / watched / progress writers.** Each has its own write chain
-  (`hiddenWriteChain`, `watchedWriteChain`, `progressWriteChain`) — a
-  `Promise` that serializes concurrent calls so two simultaneous writers
-  can't clobber each other.
+  (`enqueueHiddenWrite`, `enqueueWatchedWrite`, `enqueueProgressWrite`, built
+  by `makeSerialQueue()`) — a `Promise` that serializes concurrent calls so
+  two simultaneous writers can't clobber each other.
 - **Daily state.** `getDailyState`, `saveDailyState`, `isDailyLimitHit`.
-  Lives in local storage only — daily progress doesn't roam across devices.
+  Syncs across devices as a CRDT (`mergeDailyState`) so the daily limit can't be
+  bypassed by switching devices — see the Daily limit section.
 - **`getNow()` / `loadFakeNowOffset()` / `applyFakeNowOffsetChange()`.** A
   whole-codebase substitute for `Date.now()` so the Debug page's fake-time
   feature can offset every timestamp. Every refresh / session / lock
@@ -225,7 +226,9 @@ completion, all roads lead to `update()`, which calls
 `onNonHomePage()` runs on `/watch`, `/results`, channel pages, etc. It
 doesn't replace anything — it just removes our injected style/grid (if
 present) and lets YouTube render. Feature toggles (autoplay, comments, etc.)
-are applied globally via `injectFeatureStyle()` regardless of page.
+are applied globally by `applyFeatureSettings()` — which toggles `better-feed-*`
+classes on `<html>` — with the matching rules in features.css (loaded by the
+manifest) regardless of page.
 
 ### `options.js` + `options.html`
 
@@ -299,9 +302,13 @@ pure renderer that reacts to what the background stores.
    grid. That `storage.onChanged` is the **only** render-notification channel;
    there are no retry timers or focus hooks.
 
-`REFRESH_BACKFILL_BUFFER = 5` is a small over-scrape so that render-time
-filtering of a late-detected live stream ("Streamed N ago") doesn't shrink the
-visible grid below the target.
+`REFRESH_BACKFILL_BUFFER = 5` is a small over-scrape (save `videoCount + 5`).
+The renderer's order encodes a deliberate asymmetry: it **live-filters the saved
+pool first**, then takes the first `videoCount` as the week's **fixed set**, then
+**hidden-filters** that set. So a late-detected live stream is *backfilled* from
+the reserve (you always get `videoCount` watchable videos), while **hiding shrinks
+the grid and never backfills** — once your week's videos are in place, hiding them
+must not surface new ones until the next scheduled refresh.
 
 > Historical note: refresh used to work by redirect-bouncing the tab to vanilla
 > `youtube.com`, DOM-scraping the rendered grid, and bouncing back — wrapped in
@@ -385,18 +392,31 @@ next transition boundary and rebuilds the masthead chip when it fires.
 Tracks two counters per "day key":
 
 - `videoIds` — array of distinct video IDs started today.
-- `secondsWatched` — total watch seconds today.
+- `secondsByDevice` — `{ deviceId: seconds }`; total watch time =
+  `dailyTotalSeconds()` = sum of the buckets.
 
 A "day" is delimited by the user's `refreshHour` setting. Before that hour,
 content.js treats the day as the previous calendar date — so a limit of "3
 videos per day" with a refresh hour of 5am resets at 5am, not midnight.
+
+**Cross-device.** The daily state **syncs** so the limit roams (you can't bypass
+it by switching devices). It's merged as a CRDT (`mergeDailyState`): different
+day-keys → the later day wins (a new day resets everyone); same day → `videoIds`
+union + per-device-bucket max. Each device writes only its OWN seconds bucket, so
+summing the buckets gives the true cross-device total with no double-counting or
+lost time. The watch tab pushes the state to sync immediately on a video-count
+change or the limit-hit moment, and debounced (~30s) for routine seconds flushes
+(quota). `getDeviceId()` is a stable, local-only, never-synced random id.
+*Caveat:* "today" is local-time + `refreshHour`, so devices in different
+timezones can roll over at slightly different moments (same-timezone is exact).
+The "5 more minutes"/"finish" grace stays **per-device** (re-decided on each).
 
 `isDailyLimitHit(state, settings)` respects `dailyLimitMode`:
 
 | Mode    | Trigger                                                |
 |---------|--------------------------------------------------------|
 | `videos`| `videoIds.length >= maxVideosPerDay`                    |
-| `time`  | `secondsWatched >= maxSecondsPerDay`                    |
+| `time`  | `dailyTotalSeconds(state) >= maxSecondsPerDay`          |
 | `both`  | Either of the above (whichever hits first).             |
 
 The takeover (`renderSeeYouTomorrow`) is owned by `onHomePage` — it
@@ -441,9 +461,9 @@ grid:
   computes the per-tick delta from `videoEl.currentTime`, skips paused /
   ended / not-yet-ready frames, and discards seek jumps (`delta > 2s` or
   `delta <= 0`). Real watched seconds accumulate in
-  `watchTrackPendingSeconds` and are flushed to the daily state's
-  `secondsWatched` every `WATCH_FLUSH_INTERVAL_MS` (5s) — not on every
-  tick. After `VIDEO_COUNT_THRESHOLD_SEC` (5s) of playback, the video's
+  `watchTrackPendingSeconds` and are flushed to this device's bucket in the
+  daily state's `secondsByDevice` every `WATCH_FLUSH_INTERVAL_MS` (5s) — not on
+  every tick. After `VIDEO_COUNT_THRESHOLD_SEC` (5s) of playback, the video's
   ID is appended to `state.videoIds`; if that push crosses
   `maxVideosPerDay`, a `"finish"` grace is auto-granted for the current
   video so the user isn't yanked out mid-watch. If the daily limit is
@@ -480,8 +500,8 @@ and `sync` (cross-device, tight quotas). Every key listed below lives in
 |----------------------------------|---------------------------------------------------|
 | `STORAGE_MODE_KEY`               | Current mode (watch/work/listen).                 |
 | `STORAGE_WORK_SESSION_KEY`       | Work session state (per-device focus state).      |
-| `STORAGE_DAILY_STATE_KEY`        | Today's videoIds + secondsWatched.                |
-| `STORAGE_DAILY_GRACE_KEY`        | Active "5 more min" / "finish video" grace.       |
+| `STORAGE_DAILY_GRACE_KEY`        | Active "5 more min" / "finish video" grace (per-device). |
+| `STORAGE_DEVICE_ID_KEY`          | Stable random per-device id (tags daily seconds buckets). |
 | `STORAGE_HIDDEN_METADATA_KEY`    | Title/channel cache for hidden items.             |
 | `STORAGE_FAKE_NOW_OFFSET_KEY`    | Debug fake-time offset.                           |
 
@@ -499,6 +519,7 @@ it via YouTube's oEmbed endpoint when the popup or options page renders.
 | `STORAGE_HIDDEN_CHANNELS_KEY`    | Array of hidden channel keys.                     |
 | `STORAGE_WATCHED_VIDEOS_KEY`     | Array of watched video IDs (this week).           |
 | `STORAGE_PROGRESS_KEY`           | `{ [videoId]: {position, duration} }` locally; sync ships only the position as a bare number per video. |
+| `STORAGE_DAILY_STATE_KEY`        | Daily limit progress: `videoIds` + `secondsByDevice`. CRDT-merged (`mergeDailyState`) so the limit roams across devices. |
 
 Sync caps:
 
@@ -518,6 +539,10 @@ sync set by progressively removing lower-priority keys.
   delete signal; removed items can re-appear if a stale device pushes the
   old set. The capped sync slice keeps drift bounded.
 - **Progress map:** max-position wins per video.
+- **Daily state (`mergeDailyState`):** later day-key wins outright (new day
+  resets); within the same day, `videoIds` union + per-device-bucket max on
+  `secondsByDevice` (summed for the limit check). Each device writes only its
+  own bucket, so the cross-device total is exact — no double-count, no loss.
 
 ---
 
@@ -537,8 +562,10 @@ hits `youtube.com/oembed` to recover titles + channels. The same trick
 fills in the weekly grid via `rebuildVideoMetadataIfNeeded()`
 (content.js).
 
-oEmbed concurrency is capped at 4 (`OEMBED_CONCURRENCY`) to stay
-neighborly with YouTube's edge.
+oEmbed concurrency for the hidden-items backfill is capped at 4
+(`OEMBED_CONCURRENCY`); the content-script weekly-grid rebuild uses its own
+`VIDEO_METADATA_REBUILD_CONCURRENCY` (also 4). Both stay neighborly with
+YouTube's edge.
 
 ---
 
@@ -554,11 +581,10 @@ There are two CSS injection points:
    render. Uses `!important` and `html.<class>` ancestor selectors to
    outrank YouTube's stylesheet.
 
-2. **`injectFeatureStyle()`** in content.js. A second `<style>` block whose
-   rules are gated on feature classes (`better-feed-hide-shorts`,
-   `better-feed-hide-comments`, etc.). The classes themselves are
-   toggled on `<html>` (`document.documentElement`) by
-   `applyFeatureSettings()` whenever settings change. The constants are
+2. **features.css**, loaded by the manifest. Its rules are gated on feature
+   classes (`better-feed-hide-shorts`, `better-feed-hide-comments`, etc.),
+   which `applyFeatureSettings()` toggles on `<html>`
+   (`document.documentElement`) whenever settings change. The constants are
    named `BODY_CLASS_*` for historical reasons but attach to `<html>`,
    matching the `html.<class>` selectors used throughout.
 

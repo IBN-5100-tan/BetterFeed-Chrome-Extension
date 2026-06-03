@@ -126,8 +126,9 @@ between sections.
   3. Add the form control to `options.html`, the load wiring to
      `options.js#loadSettings`, and the save wiring to `options.js#autoSave`.
   4. If it's user-visible behavior, wire it into `content.js` (most
-     feature toggles map to a `BODY_CLASS_*` constant and a CSS rule in
-     `injectFeatureStyle`).
+     feature toggles map to a `BODY_CLASS_*` constant toggled on `<html>` by
+     `applyFeatureSettings()`, plus a CSS rule in features.css gated on that
+     class).
 
 ---
 

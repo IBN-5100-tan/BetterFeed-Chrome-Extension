@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>BetterFeed Settings</title>
@@ -935,22 +935,22 @@
           <h2>Refresh schedule</h2>
 
           <div class="lock-banner" id="refresh-schedule-lock-banner" hidden>
-            <span class="lock-banner-text"><span class="lock-banner-icon">🔒</span><span>Locked — you've already started watching today.</span></span>
+            <span class="lock-banner-text"><span class="lock-banner-icon" aria-hidden="true">🔒</span><span>Locked — you've already started watching today.</span></span>
             <button type="button" class="unlock-trigger" data-target="refresh-schedule-section">Unlock to edit</button>
           </div>
 
           <div class="lock-controls">
-          <div class="refresh-mode-group">
+          <div class="refresh-mode-group" role="radiogroup" aria-label="Refresh schedule">
             <label class="radio-label">
-              <input type="radio" name="refresh-mode" value="weekly" id="refresh-mode-weekly" />
+              <input type="radio" name="refresh-mode" value="weekly" />
               <span>Refresh weekly</span>
             </label>
             <label class="radio-label">
-              <input type="radio" name="refresh-mode" value="multi" id="refresh-mode-multi" />
+              <input type="radio" name="refresh-mode" value="multi" />
               <span>Refresh multiple times per week</span>
             </label>
             <label class="radio-label">
-              <input type="radio" name="refresh-mode" value="daily" id="refresh-mode-daily" />
+              <input type="radio" name="refresh-mode" value="daily" />
               <span>Daily refresh</span>
             </label>
           </div>
@@ -1101,7 +1101,7 @@
           <p class="section-desc">Cap how many videos or how much time you can watch each day. Resets at the same hour as your weekly refresh.</p>
 
           <div class="lock-banner" id="daily-limit-lock-banner" hidden>
-            <span class="lock-banner-text"><span class="lock-banner-icon">🔒</span><span>Locked — you've already started watching today.</span></span>
+            <span class="lock-banner-text"><span class="lock-banner-icon" aria-hidden="true">🔒</span><span>Locked — you've already started watching today.</span></span>
             <button type="button" class="unlock-trigger" data-target="daily-limit-section">Unlock to edit</button>
           </div>
 
@@ -1111,24 +1111,24 @@
             <span>Enforce daily watch limit</span>
           </label>
 
-          <div class="refresh-mode-group" id="daily-limit-mode-group" style="margin-top: 18px;">
+          <div class="refresh-mode-group" id="daily-limit-mode-group" role="radiogroup" aria-label="Daily limit mode" style="margin-top: 18px;">
             <label class="radio-label">
-              <input type="radio" name="daily-limit-mode" value="both" id="daily-limit-mode-both" />
+              <input type="radio" name="daily-limit-mode" value="both" />
               <span>Limit by both videos and watch time (whichever comes first)</span>
             </label>
             <label class="radio-label">
-              <input type="radio" name="daily-limit-mode" value="videos" id="daily-limit-mode-videos" />
+              <input type="radio" name="daily-limit-mode" value="videos" />
               <span>Limit by videos only</span>
             </label>
             <label class="radio-label">
-              <input type="radio" name="daily-limit-mode" value="time" id="daily-limit-mode-time" />
+              <input type="radio" name="daily-limit-mode" value="time" />
               <span>Limit by watch time only</span>
             </label>
           </div>
 
           <label id="max-videos-per-day-label">
             <span>Max videos per day:</span>
-            <input type="number" id="max-videos-per-day" min="1" max="50" />
+            <input type="number" id="max-videos-per-day" min="1" max="100" />
           </label>
 
           <label id="max-time-per-day-label">
@@ -1213,12 +1213,12 @@
         <div class="section">
           <h2>Manual refresh</h2>
           <button id="refresh-weekly-btn">Refresh weekly videos now</button>
-          <div class="info-text">Forces a refresh of the weekly grid. Should be removed before release.</div>
+          <div class="info-text">Forces a refresh of the weekly grid.</div>
         </div>
 
         <div class="section">
           <h2>Force-add video</h2>
-          <input type="text" id="force-add-video-input" placeholder="YouTube URL or 11-char video ID" style="margin-bottom: 10px;" />
+          <input type="text" id="force-add-video-input" aria-label="YouTube URL or video ID" placeholder="YouTube URL or 11-char video ID" style="margin-bottom: 10px;" />
           <button id="force-add-video-btn">Add to weekly grid</button>
           <div class="info-text">Adds the video as a stub (just the ID) to the weekly grid. The extension's normal metadata rebuild then fetches real title, channel, view count, duration, members-first flag, and avatar from YouTube — useful for testing detection without faking any data. After clicking Add, open or reload a YouTube tab on the weekly home to watch it fill in.</div>
         </div>

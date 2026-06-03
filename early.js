@@ -46,7 +46,11 @@ else {
   } catch {}
 }
 
-if (earlyMode === "work") {
+// Listen is work-like (content.js's isWorkLikeMode treats it as Work and
+// applies better-feed-work-mode), so it must get the same anti-flash class
+// here — otherwise the native grid/sidebar/mini-guide flash on every load
+// for a Listen user until content.js reconciles.
+if (earlyMode === "work" || earlyMode === "listen") {
   document.documentElement.classList.add("better-feed-work-mode");
 } else if (earlyMode === "watch") {
   document.documentElement.classList.add("better-feed-watch-mode");

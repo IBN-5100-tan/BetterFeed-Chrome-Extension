@@ -93,23 +93,32 @@ function getSelectedDailyLimitMode() {
 }
 
 function applyDailyLimitModeUI() {
+  const enabled = document.getElementById("daily-limit-enabled").checked;
   const mode = getSelectedDailyLimitMode();
-  // Each control is hidden when the selected mode makes it irrelevant. The
-  // info text describes the time setting, so it hides in videos-only mode.
+  // When the limit is disabled, hide the mode picker + value controls so the UI
+  // doesn't falsely imply they still apply. When enabled, hide only the control
+  // the selected mode makes irrelevant. (The info text describes the time
+  // setting, so it also hides in videos-only mode.)
   const hideWhen = {
-    "max-videos-per-day-label": mode === "time",
-    "max-time-per-day-label": mode === "videos",
-    "daily-limit-info": mode === "videos"
+    "daily-limit-mode-group": !enabled,
+    "max-videos-per-day-label": !enabled || mode === "time",
+    "max-time-per-day-label": !enabled || mode === "videos",
+    "daily-limit-info": !enabled || mode === "videos"
   };
   for (const [id, hidden] of Object.entries(hideWhen)) {
-    document.getElementById(id).style.display = hidden ? "none" : "";
+    const el = document.getElementById(id);
+    if (el) el.style.display = hidden ? "none" : "";
   }
 }
 
 // Reads the daily-limit hours+minutes inputs, floored at 0.
 function readHourMinutePair() {
   const h = Math.max(0, Number(document.getElementById("max-hours-per-day").value) || 0);
-  const m = Math.max(0, Number(document.getElementById("max-minutes-per-day").value) || 0);
+  // Clamp minutes to 0–59: this is a minutes component (HTML max=59 caps the
+  // spinner, but typed/pasted values aren't), so a stray "90" would be saved
+  // then re-displayed as "1h 30m" on reload — a confusing field jump. Excess
+  // belongs in the hours field.
+  const m = Math.max(0, Math.min(59, Number(document.getElementById("max-minutes-per-day").value) || 0));
   return { h, m };
 }
 
@@ -270,6 +279,12 @@ async function autoSave() {
   const refreshAmpm = document.getElementById("refresh-ampm").value;
   const videoCount = Number(document.getElementById("video-count").value);
 
+  // Stamp BEFORE the write: saveSettings awaits a sync round-trip after its
+  // local set(), and that set() fires storage.onChanged during the await.
+  // Stamping after (old behavior) let the onChanged echo-guard read a stale
+  // timestamp, so the tab treated its own write as a remote change and reloaded
+  // the form mid-edit — guaranteed on the first edit, when the ts was still 0.
+  lastLocalSettingsWriteTs = Date.now();
   await saveSettings({
     enabled: document.getElementById("extension-enabled").checked,
     weeklyHomeEnabled: document.getElementById("weekly-home-enabled").checked,
@@ -298,7 +313,6 @@ async function autoSave() {
     maxVideosPerDay: Number(document.getElementById("max-videos-per-day").value),
     maxSecondsPerDay: computeMaxSecondsPerDayFromInputs()
   });
-  lastLocalSettingsWriteTs = Date.now();
 
   updateInfoText();
   updateDailyLimitInfo();
@@ -448,7 +462,13 @@ document.getElementById("fake-now-clear-btn").addEventListener("click", async ()
   showStatus("Cleared — using real time");
 });
 
-setInterval(refreshFakeNowUI, 5000);
+// Only poll while the Debug page is actually visible. The fake-now status only
+// lives on that page, and pages are CSS-toggled (never unmounted), so an ungated
+// interval would hit chrome.storage every 5s for the tab's entire lifetime.
+setInterval(() => {
+  const debugPage = document.querySelector('.page[data-page="debug"]');
+  if (debugPage && debugPage.classList.contains("active")) refreshFakeNowUI();
+}, 5000);
 refreshFakeNowUI();
 
 document.getElementById("refresh-weekly-btn").addEventListener("click", async () => {
@@ -540,14 +560,26 @@ async function renderDailyStateReadout() {
   const settings = await getSettings();
   const state = await getDailyState(settings);
   const grace = await getDailyGrace(settings);
+  const myId = await getDeviceId();
+
+  // Annotate which cap is actually enforced: isDailyLimitHit counts the videos
+  // cap only when mode !== "time" and the seconds cap only when mode !== "videos".
+  const dlMode = settings.dailyLimitMode;
+  const dlOff = !settings.dailyLimitEnabled;
+  const videosNote = dlOff ? "  (limit disabled)" : dlMode === "time" ? "  (not enforced — time-only mode)" : "";
+  const timeNote = dlOff ? "  (limit disabled)" : dlMode === "videos" ? "  (not enforced — videos-only mode)" : "";
 
   const lines = [];
   lines.push(`Day key:          ${state.dayKey}`);
-  lines.push(`Videos watched:   ${state.videoIds.length} / ${settings.maxVideosPerDay}`);
+  lines.push(`Videos watched:   ${state.videoIds.length} / ${settings.maxVideosPerDay}${videosNote}`);
   if (state.videoIds.length > 0) {
     lines.push(`  ids: ${state.videoIds.join(", ")}`);
   }
-  lines.push(`Time watched:     ${formatHM(state.secondsWatched)} / ${formatHM(settings.maxSecondsPerDay)}`);
+  lines.push(`Time watched:     ${formatHM(dailyTotalSeconds(state))} / ${formatHM(settings.maxSecondsPerDay)}${timeNote}`);
+  const byDevice = state.secondsByDevice && typeof state.secondsByDevice === "object" ? state.secondsByDevice : {};
+  for (const [dev, secs] of Object.entries(byDevice)) {
+    lines.push(`  ${dev === myId ? "this device" : dev}: ${formatHM(Number(secs) || 0)}`);
+  }
   if (grace) {
     if (grace.type === "minutes") {
       const remaining = Math.max(0, Math.round((grace.expiresAt - Date.now()) / 1000));
@@ -936,7 +968,7 @@ const settingsUnlocked = new Set(); // section IDs that have been unlocked in-se
 function hasWatchProgressToday(state) {
   if (!state) return false;
   const videos = Array.isArray(state.videoIds) ? state.videoIds.length : 0;
-  const seconds = Number(state.secondsWatched) || 0;
+  const seconds = dailyTotalSeconds(state);
   return videos > 0 || seconds > 0;
 }
 

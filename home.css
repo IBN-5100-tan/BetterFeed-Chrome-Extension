@@ -13,7 +13,6 @@
 :root {
   --better-feed-text-primary: #f1f1f1;
   --better-feed-text-secondary: #aaaaaa;
-  --better-feed-base-bg: #0f0f0f;
   --better-feed-panel-bg: #0f0f0f;
   --better-feed-additive-bg: #303030;
   --better-feed-menu-bg: #282828;
@@ -25,20 +24,23 @@
 html.better-feed-light-mode {
   --better-feed-text-primary: #0f0f0f;
   --better-feed-text-secondary: #606060;
-  --better-feed-base-bg: #ffffff;
   --better-feed-panel-bg: #ffffff;
   --better-feed-additive-bg: #f2f2f2;
   --better-feed-menu-bg: #ffffff;
   --better-feed-hover-bg: rgba(0, 0, 0, 0.06);
 }
 
-ytd-browse[page-subtype="home"] ytd-rich-grid-renderer {
+/* Guarded by :not(.better-feed-show-native-home) so the native home is
+   restored when content.js sets that class (extension disabled, not in Watch
+   mode, or weekly home off) — mirrors the same guard in preload.css. Without
+   it this unconditional display:none kept YouTube's home blank when disabled. */
+html:not(.better-feed-show-native-home) ytd-browse[page-subtype="home"] ytd-rich-grid-renderer {
   display: none !important;
 }
 
-ytd-browse[page-subtype="home"] ytd-feed-filter-chip-bar-renderer,
-ytd-browse[page-subtype="home"] #chips-wrapper,
-ytd-browse[page-subtype="home"] #header.ytd-rich-grid-renderer {
+html:not(.better-feed-show-native-home) ytd-browse[page-subtype="home"] ytd-feed-filter-chip-bar-renderer,
+html:not(.better-feed-show-native-home) ytd-browse[page-subtype="home"] #chips-wrapper,
+html:not(.better-feed-show-native-home) ytd-browse[page-subtype="home"] #header.ytd-rich-grid-renderer {
   display: none !important;
 }
 
@@ -310,9 +312,8 @@ html.better-feed-see-you-tomorrow #better-feed-home .better-feed-see-you {
   z-index: 2019;
   margin: 0;
   /* No horizontal padding — alignWeekHeader pins the element's left/width
-     to the grid's bounding rect so the title sits flush with the first
-     card. The 600px media query below re-applies a small inset for narrow
-     screens where the grid spans the full container. */
+     to the grid's bounding rect (at every width) so the title sits flush
+     with the first card. */
   padding: 0;
   box-sizing: border-box;
   display: flex;
@@ -320,12 +321,10 @@ html.better-feed-see-you-tomorrow #better-feed-home .better-feed-see-you {
   pointer-events: none;
 }
 
-/* Fixed 3-column layout, sized off the viewport rather than the
-   parent. Locks both the column count *and* the card size as the
-   sidebar opens/closes — sizing off the parent makes the 1fr tracks
-   grow when the drawer's gutter goes away. The min() cap lets the
-   grid still shrink gracefully on viewports narrower than ~1300px;
-   the media queries below take over below 900px. */
+/* Fixed 3-column layout at 90% of the centered container
+   (repeat(3, minmax(0, 1fr)), margin-inline auto). The only responsive
+   override is the max-width:600px query below, which adjusts the home
+   padding — not the column count. */
 #better-feed-home .better-feed-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -460,7 +459,6 @@ html.better-feed-see-you-tomorrow #better-feed-home .better-feed-see-you {
   border-radius: 50%;
   background: var(--better-feed-additive-bg);
   overflow: hidden;
-  flex-shrink: 0;
 }
 
 #better-feed-home .better-feed-avatar img {
@@ -575,9 +573,8 @@ html.better-feed-see-you-tomorrow #better-feed-home .better-feed-see-you {
   #better-feed-home {
     padding: 80px 16px 80px 16px;
   }
-
-  #better-feed-home .better-feed-week-header {
-    margin: 0 -16px 12px -16px;
-    padding: 16px 16px;
-  }
+  /* No week-header overrides here: alignWeekHeader pins its left/width to the
+     grid's bounding rect at every width, so the old negative margin only
+     shifted the fixed bar off the grid and the extra vertical padding collapsed
+     its 56px box. */
 }

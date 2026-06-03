@@ -78,14 +78,15 @@ browser, with no proxy or middleman:
 - **`youtube.com/oembed`** — public metadata endpoint. Used after a
   cross-device sync (which carries only video IDs) to recover titles
   and channel names for hidden items and weekly-grid videos.
-- **`youtube.com/watch?v=<id>`** — fetched in the background to fill in
-  duration, view count, publish date, and the live-stream flag for videos
-  that are missing them: after a cross-device sync hydration, after a
-  manual add via the Debug page, and on page init for any stub entries.
-  The streaming-pass implementation reads only the first ~256 KB and cancels.
-- **Channel page URLs** (e.g. `youtube.com/@channelname`) — fetched
-  the same way to extract the channel avatar from the page's
-  `og:image` tag.
+- **`youtube.com/watch?v=<id>`** — fetched anonymously (cookies omitted) from
+  the active YouTube tab's content script to fill in duration, view count,
+  publish date, and the live-stream flag for videos that are missing them:
+  after a cross-device sync hydration, after a manual add via the Debug page,
+  and on page init for any stub entries. The streaming-pass implementation
+  reads only the first ~256 KB and cancels.
+- **Channel page URLs** (e.g. `youtube.com/@channelname`) — fetched the same
+  way (anonymously, from the content script) to extract the channel avatar
+  from the page's `og:image` tag.
 - **Thumbnail images on `i.ytimg.com`** — loaded as normal `<img>`
   tags when the weekly grid renders.
 - **A background request to `youtube.com/`** — when a refresh is due, the
