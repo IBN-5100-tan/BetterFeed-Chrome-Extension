@@ -333,9 +333,11 @@ function formatHM(seconds) {
 function computeMaxSecondsPerDayFromInputs() {
   const { h, m } = readHourMinutePair();
   const totalSeconds = (h * 60 + m) * 60;
-  // Don't write 0 — sanitizeSettings would coerce back to the default. Floor
-  // at 60 (1 minute) so an empty/zero state still has a sane limit.
-  return Math.max(60, totalSeconds);
+  // Clamp to [60, 86400]. Floor at 60 (1 min) so an empty/zero state still has a
+  // sane limit; cap at 24h (86400s) because sanitizeSettings REJECTS anything
+  // larger and falls back to the 1h default — so e.g. "24h 30m" would otherwise
+  // silently reset to 1 hour instead of capping at 24h.
+  return Math.min(86400, Math.max(60, totalSeconds));
 }
 
 const AUTO_SAVE_FIELDS = [
@@ -474,7 +476,14 @@ refreshFakeNowUI();
 document.getElementById("refresh-weekly-btn").addEventListener("click", async () => {
   const btn = document.getElementById("refresh-weekly-btn");
   btn.disabled = true;
-  await saveWeeklyVideosToStorage([], 0);
+  // Force a re-fetch of the current week WITHOUT the full new-week reset.
+  // saveWeeklyVideosToStorage([],0) also clears the SYNCED watched set and drops
+  // local progress, which would surface this week's videos as unwatched on every
+  // device. Instead just clear the grid + refresh marker so isRefreshDue() is
+  // true, then nudge the background — watched flags + progress survive. (An empty
+  // VIDEOS list is length-0-guarded in hydrate, so it won't clobber peers.)
+  await chrome.storage.local.set({ [STORAGE_VIDEOS_KEY]: [], [STORAGE_REFRESH_AFTER_KEY]: 0 });
+  try { await chrome.runtime.sendMessage({ type: "better-feed-ensure-fresh" }); } catch (_) {}
   showStatus("Refreshing — reload YouTube tab if grid doesn't update");
   setTimeout(() => { btn.disabled = false; }, 800);
 });
@@ -598,6 +607,11 @@ document.getElementById("reset-daily-btn").addEventListener("click", async () =>
   const btn = document.getElementById("reset-daily-btn");
   btn.disabled = true;
   await chrome.storage.local.remove([STORAGE_DAILY_STATE_KEY, STORAGE_DAILY_GRACE_KEY]);
+  // Daily state is synced (CRDT), so also clear the synced copy — otherwise the
+  // next sync event re-merges today's progress straight back. (Grace is
+  // local-only.) This empties this device's shared bucket; a still-online peer
+  // holding today's buckets could re-push, but for a single user it sticks.
+  await safeSyncRemove([STORAGE_DAILY_STATE_KEY]);
   await renderDailyStateReadout();
   await applyWatchingLockToAllSections();
   showStatus("Daily limit reset");
@@ -678,26 +692,38 @@ function initialPageFromHash() {
 async function backfillMissingHiddenVideoMetadata() {
   const { videos, metadata } = await getHiddenItemsWithMetadata();
   const existing = metadata || {};
-  const missing = [...videos].filter(id => id && !existing[id]?.title);
+  // Skip ids already known to have no oEmbed data (deleted/private/age-gated) —
+  // without this negative cache they'd be re-fetched on every render. Mirrors
+  // popup.js backfillMissingHiddenVideoMetadata.
+  const missing = [...videos].filter(id => id && !existing[id]?.title && !existing[id]?._oembedFailed);
   if (missing.length === 0) return;
 
   const fetched = {};
+  const failed = [];
   for (let i = 0; i < missing.length; i += OEMBED_CONCURRENCY) {
     const batch = missing.slice(i, i + OEMBED_CONCURRENCY);
     const results = await Promise.all(batch.map(fetchVideoMetadataFromOEmbed));
     for (let j = 0; j < batch.length; j++) {
       if (results[j]) fetched[batch[j]] = results[j];
+      else failed.push(batch[j]);
     }
   }
-  if (Object.keys(fetched).length === 0) return;
+  if (Object.keys(fetched).length === 0 && failed.length === 0) return;
 
   await modifyHidden(state => {
     if (!state.metadata) state.metadata = {};
     for (const [id, m] of Object.entries(fetched)) {
       if (!state.metadata[id]?.title) state.metadata[id] = { type: "video", ...m };
     }
+    // Negative cache: mark definitively-unavailable ids so they aren't retried
+    // (cleared automatically when the item is unhidden — its metadata is deleted).
+    for (const id of failed) {
+      if (!state.metadata[id]?.title) {
+        state.metadata[id] = { ...(state.metadata[id] || {}), type: "video", title: "", _oembedFailed: true };
+      }
+    }
   });
-  renderHiddenItems();
+  if (Object.keys(fetched).length > 0) renderHiddenItems();
 }
 
 // channelDisplayFromKey lives in shared.js (shared with popup.js).

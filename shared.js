@@ -555,24 +555,30 @@ function getDailyDayKey(settings, now = new Date(getNow())) {
 }
 
 let _deviceIdCache = null;
+let _ephemeralDeviceId = null;
+function _randomDeviceId() {
+  return "dev-" + (typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${getNow()}-${Math.floor(Math.random() * 1e9)}`);
+}
 async function getDeviceId() {
   if (_deviceIdCache) return _deviceIdCache;
   try {
     const data = await chrome.storage.local.get([STORAGE_DEVICE_ID_KEY]);
     let id = data[STORAGE_DEVICE_ID_KEY];
     if (typeof id !== "string" || !id) {
-      id = "dev-" + (typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${getNow()}-${Math.floor(Math.random() * 1e9)}`);
+      id = _randomDeviceId();
       await chrome.storage.local.set({ [STORAGE_DEVICE_ID_KEY]: id });
     }
     _deviceIdCache = id;
     return id;
   } catch (_) {
-    // Storage hiccup — use an ephemeral id so per-device accounting still works
-    // this session rather than throwing in the watch-tracking path.
-    if (!_deviceIdCache) _deviceIdCache = "dev-ephemeral";
-    return _deviceIdCache;
+    // Storage hiccup — return a UNIQUE ephemeral id. Do NOT poison _deviceIdCache
+    // (so the next call re-attempts storage once it recovers) and never use a
+    // shared literal (so two devices can't collide on one bucket and undercount
+    // via mergeDailyState's per-key max).
+    if (!_ephemeralDeviceId) _ephemeralDeviceId = _randomDeviceId();
+    return _ephemeralDeviceId;
   }
 }
 
@@ -617,18 +623,36 @@ async function getDailyState(settings) {
   const videoIds = Array.isArray(stored.videoIds) ? stored.videoIds : [];
   let secondsByDevice = sanitizeSecondsMap(stored.secondsByDevice);
   if (!secondsByDevice) {
-    // Migrate the pre-sync single-counter shape: attribute existing local watch
-    // time to THIS device's bucket so it sums/merges correctly from here on.
+    // Migrate the pre-sync single-counter shape into a fixed "legacy" sentinel
+    // bucket (NOT this device's id). If an old non-CRDT sync cloned the same
+    // secondsWatched onto several devices, they all migrate into the same
+    // "legacy" key, so mergeDailyState's per-key max de-dupes it instead of
+    // summing (avoids an upgrade-day cross-device over-count). New watch time
+    // still accrues under the real getDeviceId() bucket in flushWatchSeconds.
     const legacy = Number(stored.secondsWatched);
-    secondsByDevice = Number.isFinite(legacy) && legacy > 0
-      ? { [await getDeviceId()]: legacy }
-      : {};
+    secondsByDevice = Number.isFinite(legacy) && legacy > 0 ? { legacy } : {};
   }
   return { dayKey: stored.dayKey, videoIds, secondsByDevice };
 }
 
+// Canonical form so equal daily states stringify identically (videoIds deduped
+// + sorted, device keys sorted). The sync echo guards compare via
+// JSON.stringify, so without this two peers that accumulated the same ids in a
+// different order would never converge and would re-push forever.
+function canonicalDailyState(state) {
+  if (!state || typeof state !== "object") return state;
+  const videoIds = Array.isArray(state.videoIds) ? [...new Set(state.videoIds)].sort() : [];
+  const src = state.secondsByDevice && typeof state.secondsByDevice === "object" ? state.secondsByDevice : {};
+  const secondsByDevice = {};
+  for (const k of Object.keys(src).sort()) {
+    const n = Number(src[k]);
+    if (Number.isFinite(n) && n > 0) secondsByDevice[k] = n;
+  }
+  return { dayKey: state.dayKey, videoIds, secondsByDevice };
+}
+
 async function saveDailyState(state) {
-  await chrome.storage.local.set({ [STORAGE_DAILY_STATE_KEY]: state });
+  await chrome.storage.local.set({ [STORAGE_DAILY_STATE_KEY]: canonicalDailyState(state) });
 }
 
 function isDailyLimitHit(state, settings) {
@@ -646,33 +670,63 @@ function isDailyVideoQuotaReached(state, settings) {
   return (state.videoIds?.length || 0) >= settings.maxVideosPerDay;
 }
 
-// CRDT merge for the daily state across devices. Different day-keys: the later
-// day wins outright (a new day cleanly resets everyone). Same day: union the
-// videoIds (a video watched on any device counts once) and take the max of each
-// device's seconds bucket — each device only ever increments its OWN bucket, so
-// max is that device's latest value, and summing the buckets gives the true
-// cross-device total (so the time limit can't be bypassed by switching devices).
-function mergeDailyState(a, b) {
+const MS_DAY = 24 * 60 * 60 * 1000;
+function isValidDayKey(k) {
+  if (typeof k !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(k)) return false;
+  // Reject implausibly-future keys (clock skew / corruption) so a garbage key
+  // like "9999-99-99" (or "undefined") can never beat a real YYYY-MM-DD.
+  const t = Date.parse(k + "T00:00:00Z");
+  return Number.isFinite(t) && t <= getNow() + MS_DAY;
+}
+
+// Per-device seconds buckets for a state, folding a LEGACY single-counter
+// operand (old { secondsWatched } shape) into a shared "legacy" bucket so its
+// time is merged (not silently dropped) and de-duped by max, not summed.
+function dailySecondsBuckets(s) {
+  if (s && s.secondsByDevice && typeof s.secondsByDevice === "object") return s.secondsByDevice;
+  const legacy = Number(s && s.secondsWatched);
+  return (Number.isFinite(legacy) && legacy > 0) ? { legacy } : null;
+}
+
+// CRDT merge for the daily state across devices. Different day-keys: prefer the
+// side matching THIS device's current day (todayKey, when supplied) so a sibling
+// already rolled into the next local day (timezone skew) can't wipe the day this
+// device is still accumulating; otherwise the later VALID day wins (a malformed
+// or implausible dayKey never beats a well-formed one, so it can't wipe local
+// progress). Same day: union videoIds + per-device-bucket max — each device only
+// increments its OWN bucket, so max is that device's latest and summing the
+// buckets gives the true cross-device total (can't be bypassed by switching
+// devices). Output is canonical (deduped/sorted) so the echo guards converge.
+function mergeDailyState(a, b, todayKey) {
   if (!a || typeof a !== "object") return (b && typeof b === "object") ? b : null;
   if (!b || typeof b !== "object") return a;
   if (a.dayKey !== b.dayKey) {
-    return String(b.dayKey) > String(a.dayKey) ? b : a;
+    const aOk = isValidDayKey(a.dayKey);
+    const bOk = isValidDayKey(b.dayKey);
+    if (typeof todayKey === "string") {
+      if (a.dayKey === todayKey) return aOk ? a : (bOk ? b : a);
+      if (b.dayKey === todayKey) return bOk ? b : (aOk ? a : b);
+    }
+    if (aOk && bOk) return b.dayKey > a.dayKey ? b : a;
+    if (aOk) return a;
+    if (bOk) return b;
+    return a;
   }
   const videoIds = [...new Set([
     ...(Array.isArray(a.videoIds) ? a.videoIds : []),
     ...(Array.isArray(b.videoIds) ? b.videoIds : [])
-  ])];
-  const secondsByDevice = {};
-  for (const src of [a.secondsByDevice, b.secondsByDevice]) {
+  ])].sort();
+  const merged = {};
+  for (const src of [dailySecondsBuckets(a), dailySecondsBuckets(b)]) {
     if (src && typeof src === "object") {
       for (const [k, v] of Object.entries(src)) {
         const n = Number(v);
-        if (k && Number.isFinite(n) && n > 0) {
-          secondsByDevice[k] = Math.max(secondsByDevice[k] || 0, n);
-        }
+        if (k && Number.isFinite(n) && n > 0) merged[k] = Math.max(merged[k] || 0, n);
       }
     }
   }
+  const secondsByDevice = {};
+  for (const k of Object.keys(merged).sort()) secondsByDevice[k] = merged[k];
   return { dayKey: a.dayKey, videoIds, secondsByDevice };
 }
 
@@ -698,6 +752,9 @@ function isGraceActiveForLocation(grace, locationLike) {
     return getNow() < grace.expiresAt;
   }
   if (grace.type === "finish") {
+    // A finish grace with no videoId is stale/bogus — never treat it as active
+    // (otherwise params.get("v")===null would match any v-less watch URL).
+    if (!grace.videoId) return false;
     if (!locationLike || locationLike.pathname !== "/watch") return false;
     const params = new URLSearchParams(locationLike.search || "");
     return params.get("v") === grace.videoId;
@@ -1251,7 +1308,7 @@ async function hydrateFromSync() {
       localLists[STORAGE_DAILY_STATE_KEY] && typeof localLists[STORAGE_DAILY_STATE_KEY] === "object"
         ? localLists[STORAGE_DAILY_STATE_KEY]
         : null;
-    const merged = mergeDailyState(localDaily, sync[STORAGE_DAILY_STATE_KEY]);
+    const merged = mergeDailyState(localDaily, sync[STORAGE_DAILY_STATE_KEY], await currentDayKey());
     if (merged && JSON.stringify(merged) !== JSON.stringify(localDaily)) {
       updates[STORAGE_DAILY_STATE_KEY] = merged;
     }
@@ -1327,7 +1384,7 @@ async function pushLocalToSyncIfMissing(sync) {
     const localDaily = local[STORAGE_DAILY_STATE_KEY];
     const syncDaily = sync[STORAGE_DAILY_STATE_KEY];
     if (localDaily && typeof localDaily === "object" && localDaily.dayKey) {
-      const merged = mergeDailyState(typeof syncDaily === "object" ? syncDaily : null, localDaily);
+      const merged = mergeDailyState(typeof syncDaily === "object" ? syncDaily : null, localDaily, await currentDayKey());
       if (merged && JSON.stringify(merged) !== JSON.stringify(syncDaily)) {
         toPush[STORAGE_DAILY_STATE_KEY] = merged;
       }
@@ -1341,17 +1398,33 @@ async function pushLocalToSyncIfMissing(sync) {
   }
 }
 
+// This device's current day key (local time + refreshHour). Passed to the
+// daily-state merges so a sibling already in the next local day can't wipe the
+// day this device is still accumulating.
+async function currentDayKey() {
+  return getDailyDayKey(await getSettings());
+}
+
 // Push the local daily state to sync — called debounced/immediately from the
-// watch tab (see content.js scheduleDailyStateSync). Reads the latest local
-// value so a debounced call ships current data.
-async function pushDailyStateToSync() {
+// watch tab (see content.js scheduleDailyStateSync). Reads sync FIRST and pushes
+// the MERGE so a concurrent peer's bucket is never clobbered (matches the other
+// three daily-state sync paths). allowEvict only on the enforcement-critical
+// immediate push — a routine seconds bump must not evict the durable weekly
+// grid / watched / progress keys (they'd just re-push on the next hydrate = pure
+// thrash for a 1-second counter delta).
+async function pushDailyStateToSync({ allowEvict = false } = {}) {
   try {
-    const data = await chrome.storage.local.get([STORAGE_DAILY_STATE_KEY]);
-    const state = data[STORAGE_DAILY_STATE_KEY];
+    const local = await chrome.storage.local.get([STORAGE_DAILY_STATE_KEY]);
+    const state = local[STORAGE_DAILY_STATE_KEY];
     if (!state || typeof state !== "object" || !state.dayKey) return;
+    const cur = await chrome.storage.sync.get([STORAGE_DAILY_STATE_KEY]);
+    const syncDaily = cur[STORAGE_DAILY_STATE_KEY];
+    const merged = mergeDailyState(typeof syncDaily === "object" ? syncDaily : null, state, await currentDayKey());
+    if (!merged) return;
+    if (typeof syncDaily === "object" && JSON.stringify(merged) === JSON.stringify(syncDaily)) return;
     await priorityWriteSync(
-      { [STORAGE_DAILY_STATE_KEY]: state },
-      { evictKeysInOrder: [STORAGE_VIDEOS_KEY, STORAGE_WATCHED_VIDEOS_KEY, STORAGE_PROGRESS_KEY] }
+      { [STORAGE_DAILY_STATE_KEY]: merged },
+      { evictKeysInOrder: allowEvict ? [STORAGE_VIDEOS_KEY, STORAGE_WATCHED_VIDEOS_KEY, STORAGE_PROGRESS_KEY] : [] }
     );
   } catch (_) {}
 }
@@ -1493,7 +1566,7 @@ async function applySyncChangeToLocal(changes) {
       local[STORAGE_DAILY_STATE_KEY] && typeof local[STORAGE_DAILY_STATE_KEY] === "object"
         ? local[STORAGE_DAILY_STATE_KEY]
         : null;
-    const merged = mergeDailyState(localDaily, changes[STORAGE_DAILY_STATE_KEY].newValue);
+    const merged = mergeDailyState(localDaily, changes[STORAGE_DAILY_STATE_KEY].newValue, await currentDayKey());
     if (merged && JSON.stringify(merged) !== JSON.stringify(localDaily)) {
       updates[STORAGE_DAILY_STATE_KEY] = merged;
     }
@@ -1561,9 +1634,8 @@ function parseLockupViewModel(lockup) {
       // too. Gating on the path prefix prevents storing one as the channel.
       if (handleUrl && !channelName && /^\/(@|channel\/|c\/)/.test(handleUrl)) {
         channelName = text;
-        // Make URL absolute, matching what the DOM-scrape path stores via
-        // findChannelUrl. Hidden-channel matching uses channelUrl as the key,
-        // so the two refresh paths must agree.
+        // Make the URL absolute so hidden-channel matching (which keys on
+        // channelUrl) compares equal regardless of which refresh path produced it.
         channelUrl = normalizeRelativeYouTubeUrl(handleUrl);
         continue;
       }

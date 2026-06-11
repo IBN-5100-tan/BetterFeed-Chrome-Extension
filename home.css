@@ -10,25 +10,9 @@
  * change either, change both.
  * ============================================================================= */
 
-:root {
-  --better-feed-text-primary: #f1f1f1;
-  --better-feed-text-secondary: #aaaaaa;
-  --better-feed-panel-bg: #0f0f0f;
-  --better-feed-additive-bg: #303030;
-  --better-feed-menu-bg: #282828;
-  --better-feed-hover-bg: rgba(255, 255, 255, 0.1);
-  --better-feed-primary-action: #3ea6ff;
-  --better-feed-primary-action-hover: #2d88cc;
-}
-
-html.better-feed-light-mode {
-  --better-feed-text-primary: #0f0f0f;
-  --better-feed-text-secondary: #606060;
-  --better-feed-panel-bg: #ffffff;
-  --better-feed-additive-bg: #f2f2f2;
-  --better-feed-menu-bg: #ffffff;
-  --better-feed-hover-bg: rgba(0, 0, 0, 0.06);
-}
+/* The --better-feed-* design tokens (and their light-mode overrides) live in
+   preload.css now (loaded at document_start) so features.css — also loaded at
+   document_start — can resolve them before home.css would arrive. */
 
 /* Guarded by :not(.better-feed-show-native-home) so the native home is
    restored when content.js sets that class (extension disabled, not in Watch

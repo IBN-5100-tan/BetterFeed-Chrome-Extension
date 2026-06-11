@@ -55,3 +55,23 @@ if (earlyMode === "work" || earlyMode === "listen") {
 } else if (earlyMode === "watch") {
   document.documentElement.classList.add("better-feed-watch-mode");
 }
+
+// Re-apply the last-known cleanup-hide classes (mirrored to localStorage by
+// content.js applyFeatureSettings). features.css is loaded at document_start
+// too, so applying the classes here hides the watch-page recommendations /
+// comments / Shorts before first paint instead of flashing them in; content.js
+// reconciles the exact set once it has read settings. The name guard stops a
+// tampered value from injecting arbitrary classes.
+try {
+  const rawFeatureClasses = localStorage.getItem("betterFeedFeatureClasses");
+  if (rawFeatureClasses) {
+    const featureClasses = JSON.parse(rawFeatureClasses);
+    if (Array.isArray(featureClasses)) {
+      for (const c of featureClasses) {
+        if (typeof c === "string" && c.indexOf("better-feed-") === 0) {
+          document.documentElement.classList.add(c);
+        }
+      }
+    }
+  }
+} catch {}

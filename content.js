@@ -6,12 +6,11 @@
 //
 // Major responsibilities, in roughly the order they appear below:
 //
-//   - SELECTORS / REGEX  : YouTube DOM and metadata pattern catalogs. Bundled at
-//                          the top so a YT redesign only needs one place edited.
 //   - THEME              : Detect YouTube's light/dark theme and mirror it onto
 //                          the extension's own surfaces.
-//   - STYLE              : Inject the giant CSS blob that re-skins the marker
-//                          page into the weekly home grid (+ feature toggles).
+//   - STYLE              : Toggle the <html> feature/mode classes; the actual
+//                          rules live in home.css / features.css, loaded by the
+//                          manifest (no runtime <style> injection).
 //   - RENDER             : Build the weekly grid DOM from a stored video list.
 //   - REFRESH SCHEDULE   : Translate weekly/multi/daily refresh settings into
 //                          a concrete next-refresh timestamp + grid header.
@@ -19,8 +18,9 @@
 //   - METADATA REBUILD   : Re-populate stub entries (title/channel/duration)
 //                          via YouTube's oEmbed endpoint + the watch page. Runs
 //                          after a sync hydrate, since sync only ships video IDs.
-//   - FILTERS / EXTRACTORS: Pull a clean video record out of the raw home-grid
-//                          DOM, rejecting Shorts/mixes/ads/live broadcasts.
+//   - FILTERS            : Render-time hidden/live filtering of the stored grid.
+//                          (Home-grid parsing/extraction lives in shared.js,
+//                          driven by background.js's HTTP-fetch refresh.)
 //   - WEEKLY GRID RENDER : renderFromStorage — pure read of the stored grid +
 //                          background-owned refresh status; paints the grid,
 //                          the "Refreshing…" loader, or a quiet retry message.
@@ -159,9 +159,19 @@ async function applyFeatureSettings() {
   // Each cleanup toggle maps a body class to its settings flag. When the
   // extension is disabled, every class is forced off (toggle(_, false) removes
   // it) and we return before any feature work.
+  const activeFeatureClasses = [];
   for (const [cls, key] of FEATURE_CLASS_SETTINGS) {
-    root.classList.toggle(cls, settings.enabled && settings[key]);
+    const on = settings.enabled && settings[key];
+    root.classList.toggle(cls, on);
+    if (on) activeFeatureClasses.push(cls);
   }
+  // Mirror the active cleanup classes to localStorage so early.js can re-apply
+  // them at document_start on the next load. features.css is loaded at
+  // document_start too; without the class present that early, the watch-page
+  // recs / comments / shorts flash in before this async settings read runs.
+  try {
+    localStorage.setItem("betterFeedFeatureClasses", JSON.stringify(activeFeatureClasses));
+  } catch (_) {}
   if (!settings.enabled) return;
 
   if (settings.disableAutoplay) {
@@ -270,15 +280,18 @@ async function renderCustomHome(videos, options = {}) {
   const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
-  const [hidden, settings, watched, progressMap] = await Promise.all([
-    getHiddenItems(),
+  const [settings, watched, progressMap] = await Promise.all([
     getSettings(),
     getWatchedVideos(),
     getVideoProgressMap()
   ]);
   if (myToken !== renderToken) return;
 
-  const visibleVideos = filterHiddenVideos(videos, hidden);
+  // Both callers (renderFromStorage / refreshVisibleVideosAfterHide) already
+  // hidden-filter the fixed weekly set before passing it in, so we don't re-read
+  // hidden here — a second (microtask-fresher) read could momentarily collapse
+  // the grid to empty if a hide landed between the caller's read and this one.
+  const visibleVideos = videos;
   const unwatched = visibleVideos.filter(v => !watched.has(v?.videoId));
   const watchedVideos = visibleVideos.filter(v => watched.has(v?.videoId));
   // No slice here: callers pass the already-truncated weekly set (the first
@@ -1539,14 +1552,19 @@ async function renderFromStorage() {
     await renderCustomHome(visible);
     return;
   }
-  // No renderable videos yet (cold / refreshing), or the whole weekly set is
-  // hidden — fall through to the loader/retry + nudge below rather than painting
-  // an empty grid.
+  // The weekly set exists but the user hid all of it — show an honest terminal
+  // message, NOT the "Refreshing" spinner. The background won't re-scrape to
+  // backfill hidden videos (fixed-set design), so the spinner would never
+  // resolve; skip the nudge too since the saved grid is already fresh.
+  if (weeklySet.length > 0) {
+    renderLoadingMessage("You've hidden all of this week's videos. New ones arrive at the next refresh.");
+    return;
+  }
 
-  // No usable grid yet. Pick the loader vs. a quiet retry message from the
-  // background-owned refresh status. We never show a terminal "reload to try
-  // again" error — the background retries on its alarm and the storage
-  // onChanged re-renders us when videos land.
+  // No videos saved yet (cold / refreshing). Pick the loader vs. a quiet retry
+  // message from the background-owned refresh status. We never show a terminal
+  // "reload to try again" error — the background retries on its alarm and the
+  // storage onChanged re-renders us when videos land.
   const status = statusData[STORAGE_REFRESH_STATUS_KEY];
   const state = status && status.state;
   if (state === "error") {
@@ -1576,6 +1594,10 @@ async function onHomePage() {
   }
   updateInProgress = true;
 
+  // Leaving a /watch page for the home grid — drop any stale live-chat state set
+  // on <html> while watching a live video (idempotent; inert on home but tidy).
+  stopWatchLiveChatPresence();
+
   try {
     if (coldStartActive) {
       if (coldStartAwaitingChoice) {
@@ -1591,6 +1613,15 @@ async function onHomePage() {
       } else {
         renderColdStartLoading();
       }
+      return;
+    }
+
+    // A fresh-tab navigation that already has a saved mode shows the mode picker
+    // to re-confirm the pick. Don't paint the grid (or lift the pre-ready fade)
+    // underneath it first — that flashed the custom home for a moment before the
+    // picker appeared. maybeShowModePicker() renders the picker; once the user
+    // picks, onModePicked clears the flag and re-renders.
+    if (freshTabAwaitingMode) {
       return;
     }
 
@@ -1656,6 +1687,7 @@ async function onHomePage() {
 let liveChatObserver = null;
 let liveChatObserverTimer = null;
 let liveChatRecheckQueued = false;
+let liveChatArmedVideoId = null;
 
 function updateLiveChatPresence() {
   const f = document.querySelector("ytd-live-chat-frame");
@@ -1668,6 +1700,13 @@ function watchLiveChatPresence() {
   // a bounded window (disconnect after 12s so we don't leak an observer). The
   // rAF gate coalesces YouTube's frequent DOM mutations into one check per frame.
   updateLiveChatPresence();
+  // Idempotent per video: onNonHomePage() calls this on every update(), and the
+  // daily-state flush fires update() ~every 5s on /watch — re-arming each time
+  // would reset the 12s disconnect timer forever (a body-subtree observer
+  // running the whole video). Only (re-)arm on an actual video change.
+  const vid = getWatchPageVideoId();
+  if (liveChatArmedVideoId === vid) return;
+  liveChatArmedVideoId = vid;
   if (liveChatObserver) liveChatObserver.disconnect();
   if (liveChatObserverTimer) clearTimeout(liveChatObserverTimer);
   liveChatObserver = new MutationObserver(() => {
@@ -1687,6 +1726,7 @@ function watchLiveChatPresence() {
 function stopWatchLiveChatPresence() {
   if (liveChatObserver) { liveChatObserver.disconnect(); liveChatObserver = null; }
   if (liveChatObserverTimer) { clearTimeout(liveChatObserverTimer); liveChatObserverTimer = null; }
+  liveChatArmedVideoId = null;
   document.documentElement.classList.remove("better-feed-live-chat-present");
 }
 
@@ -2125,11 +2165,10 @@ function renderColdStartRefreshCustom() {
     dayField.appendChild(dayLabel);
 
     const daySelect = document.createElement("select");
-    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     for (let i = 0; i < 7; i++) {
       const opt = document.createElement("option");
       opt.value = String(i);
-      opt.textContent = days[i];
+      opt.textContent = DAY_NAMES_LONG[i];
       if (i === draft.refreshDay) opt.selected = true;
       daySelect.appendChild(opt);
     }
@@ -2151,7 +2190,6 @@ function renderColdStartRefreshCustom() {
 
     const grid = document.createElement("div");
     grid.className = "better-feed-setup-days-grid";
-    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const selectedSet = new Set(draft.refreshDays || []);
     for (let i = 0; i < 7; i++) {
       const dayCheck = document.createElement("label");
@@ -2166,7 +2204,7 @@ function renderColdStartRefreshCustom() {
         draft.refreshDays = [...selectedSet].sort((a, b) => a - b);
       });
       const span = document.createElement("span");
-      span.textContent = dayNames[i];
+      span.textContent = DAY_NAMES_LONG[i];
       dayCheck.appendChild(cb);
       dayCheck.appendChild(span);
       grid.appendChild(dayCheck);
@@ -2651,6 +2689,10 @@ function renderModePicker() {
       // Clear the fresh-tab gate so the picker doesn't immediately re-show.
       freshTabAwaitingMode = false;
       removeModePicker();
+      // onHomePage suppressed all rendering while the picker was up (and the
+      // native home is hidden for Watch mode), so paint the real mode UI now
+      // that the gate is clear — otherwise dismissing via X leaves a blank page.
+      update();
     });
     overlay.appendChild(closeBtn);
   }
@@ -3310,6 +3352,15 @@ function setupModalDialog(overlay, card, titleEl) {
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   });
+  // Move initial focus into the card so the FIRST Tab is already trapped. The
+  // button-only modals (channel-confirm / session-ended / daily-limit) never
+  // focus anything themselves, so without this the first Tab escapes to the page.
+  requestAnimationFrame(() => {
+    const f = card.querySelector(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    if (f) f.focus();
+  });
 }
 
 function renderWorkUnlockModal({ targetMode } = {}) {
@@ -3806,6 +3857,13 @@ window.addEventListener("pagehide", () => {
   if (watchedMarkLastWrittenFraction > 0) {
     flushProgressToSync().catch(() => {});
   }
+  // Best-effort: commit the last (up to ~5s) of pending watch-seconds and push
+  // the daily state immediately, so they aren't lost locally and the debounced
+  // seconds reach sync on a hard close. Same unload caveat as flushProgressToSync.
+  if (watchTrackPendingSeconds > 0) {
+    getSettings().then(s => flushWatchSeconds(s)).catch(() => {});
+  }
+  scheduleDailyStateSync({ immediate: true });
 });
 
 document.addEventListener("yt-navigate-finish", () => {
@@ -3880,7 +3938,7 @@ function scheduleDailyStateSync({ immediate = false } = {}) {
   if (immediate) {
     if (_dailySyncTimer) { clearTimeout(_dailySyncTimer); _dailySyncTimer = null; }
     _lastDailySyncAt = getNow();
-    pushDailyStateToSync().catch(() => {});
+    pushDailyStateToSync({ allowEvict: true }).catch(() => {});
     return;
   }
   if (_dailySyncTimer) return;
@@ -3900,8 +3958,12 @@ async function flushWatchSeconds(settings) {
   watchTrackPendingSeconds = 0;
   watchTrackLastFlushTime = getNow();
   const result = await queueDailyStateUpdate(async () => {
-    const state = await getDailyState(settings);
+    // Resolve the device id BEFORE reading state so there's no await between the
+    // read and the write — otherwise a background applySyncChangeToLocal could
+    // merge a peer's bucket into storage in that gap and our write would clobber
+    // it (cross-realm: the content and sync chains don't share a lock).
     const id = await getDeviceId();
+    const state = await getDailyState(settings);
     state.secondsByDevice = state.secondsByDevice || {};
     state.secondsByDevice[id] = (state.secondsByDevice[id] || 0) + pending;
     await saveDailyState(state);
@@ -3932,6 +3994,10 @@ async function stopWatchTracking() {
       await flushWatchSeconds(settings);
     } catch (_) {}
   }
+  // Collapse any debounced sync timer the flush armed into one immediate push so
+  // a stale timer can't fire up to 30s after we leave Watch mode (and the final
+  // seconds reach a sibling device promptly).
+  scheduleDailyStateSync({ immediate: true });
   resetWatchTrackingState();
 }
 
@@ -3999,14 +4065,11 @@ async function tickWatchTracking() {
   }
 
   const grace = await getDailyGrace(settings);
-  if (isGraceActiveForLocation(grace, location)) {
-    if (grace.type === "minutes" && getNow() >= grace.expiresAt) {
-      await stopWatchTracking();
-      await saveDailyGrace(null);
-      redirectToBlockedMarker();
-    }
-    return;
-  }
+  // An active grace pauses limit tracking. Minutes-grace EXPIRY is handled by
+  // armGraceExpirationTimer + maybeEnforceGraceOnNavigation — an in-tick expiry
+  // check here would be dead code, since isGraceActiveForLocation already
+  // returns false once a minutes grace has passed its expiry.
+  if (isGraceActiveForLocation(grace, location)) return;
 
   watchTrackPendingSeconds += delta;
   watchTrackPlaybackSeconds += delta;
@@ -4327,8 +4390,14 @@ async function onGraceChosen(type, seconds) {
   let grace;
   if (type === "minutes") {
     grace = { type: "minutes", expiresAt: getNow() + seconds * 1000, dayKey };
-  } else {
+  } else if (currentVideoId) {
     grace = { type: "finish", videoId: currentVideoId, dayKey };
+  } else {
+    // No video id (URL raced/changed between limit-hit and click). A
+    // null-videoId "finish" grace would spuriously match any v-less watch URL
+    // and never a real video — just dismiss instead of persisting a bogus grace.
+    dismissDailyLimitPopup();
+    return;
   }
   await saveDailyGrace(grace);
   dismissDailyLimitPopup();

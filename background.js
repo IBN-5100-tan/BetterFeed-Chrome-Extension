@@ -265,6 +265,11 @@ async function ensureFreshVideos(reason) {
 }
 
 async function runRefresh(reason) {
+  // Load the fake-now offset first so every refresh — regardless of which entry
+  // point woke the SW (message / alarm / startup / storage) — computes
+  // isRefreshDue, the in-flight/error cooldowns, and getNextRefreshTime against
+  // the same (debug) clock. No-op when no offset is set (production).
+  await loadFakeNowOffset();
   // Don't refresh until the user has completed onboarding. getSettings()
   // returns full defaults (enabled=true) even when nothing is stored, so we
   // can't use it to detect a fresh/cleared profile — check the raw key. While
@@ -331,7 +336,10 @@ async function runRefresh(reason) {
       settings.videoCount + REFRESH_BACKFILL_BUFFER,
       MAX_WEEKLY_VIDEOS
     );
-    const chosen = chooseWeeklyVideos(visible, target, hidden);
+    // `visible` is already filterHiddenVideos'd above, so don't re-pass hidden
+    // (chooseWeeklyVideos would just re-run isVideoHidden on an already-filtered
+    // list — dead work). hidden is still used for the filter at the top.
+    const chosen = chooseWeeklyVideos(visible, target);
     if (chosen.length === 0) throw new Error("0 usable videos parsed");
 
     // Save advances refreshAfter and ships IDs to sync. The VIDEOS write fires

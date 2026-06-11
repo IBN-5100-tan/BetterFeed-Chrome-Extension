@@ -28,13 +28,13 @@
     {
       "matches": ["*://www.youtube.com/*"],
       "js": ["early.js"],
-      "css": ["preload.css"],
+      "css": ["preload.css", "features.css"],
       "run_at": "document_start"
     },
     {
       "matches": ["*://www.youtube.com/*"],
       "js": ["shared.js", "content.js"],
-      "css": ["home.css", "features.css"]
+      "css": ["home.css"]
     }
   ]
 }
