@@ -3834,9 +3834,15 @@ ensureThemeObserver();
   }
 
   // Force the picker on freshly-opened YouTube tabs (typed URL, bookmark,
-  // external link), but NOT on internal Cmd-click / SPA / reload / back-forward.
+  // external link), but NOT on internal Cmd-click / SPA / reload / back-forward
+  // — and NOT when the tab lands directly on a video while a mode is already
+  // active. Opening a video in a new tab from an in-mode tab is a deliberate
+  // continuation of that mode, and the referrer heuristic alone can't be
+  // trusted to detect it (Brave shields / Firefox strict privacy can strip
+  // even same-origin referrers, making the new tab look "fresh"). A no-mode
+  // state still prompts on /watch — there's nothing to continue.
   // Skipped during cold start since it already owns the picker's timing.
-  if (!coldStart && currentMode && isFreshTabNavigation()) {
+  if (!coldStart && currentMode && location.pathname !== "/watch" && isFreshTabNavigation()) {
     freshTabAwaitingMode = true;
   }
   if (!coldStartActive) {

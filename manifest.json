@@ -4,6 +4,12 @@
   "version": "0.1",
   "description": "Replace YouTube's algorithmic home with a static, scheduled feed — plus focus modes, daily watch limits, and distraction cleanup.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt/uwEeH2VSvy88HLMQftJzC2LcK3793JmZ7Hqvm0BzM8MHRHgrOi5jmvZGx3GLZlz9rXv+mL4eo/R5jTU58XA9xp7OegmzGeZDwi7Cj3BV/mNNPZ0X3Wu/y4ojgTXBGI1J4IDVcGrTCTA/A8uvpPPdpj0epgF1H90YmUaTi29GgiSs7sIkPiex70KTfGhJ1fE4P6a8CcfBIkQC2iYXKORqt7Eh4lx8ZOI73ZBSR2i5O8RzFQ2MzGksaeYcbF9PJjFp/Du81GYicFbfMTDZp5apTjlGKGOGFFerGiR9qVWjQo4obk2+xfosHYO+reMo1L3dx5Hwoxh3aUbvMXp0NfIQIDAQAB",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": ["storage", "declarativeNetRequest", "alarms"],
   "host_permissions": ["*://www.youtube.com/*"],
   "browser_specific_settings": {
@@ -14,7 +20,13 @@
   },
   "action": {
     "default_title": "BetterFeed Settings",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "options_ui": {
     "page": "options.html",

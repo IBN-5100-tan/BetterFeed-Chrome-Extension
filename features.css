@@ -71,9 +71,14 @@ html.better-feed-disable-autoplay .ytp-upnext {
   display: none !important;
 }
 
+/* .ytp-ce-hide-button-container is YouTube's own "Hide"/"Show" pill for
+   end-screen cards (top-right of the player as the cards appear; defined in
+   the player's annotations_module.js). With the cards already hidden the
+   toggle is dead weight, so it goes too. */
 html.better-feed-hide-end-screen-cards .ytp-endscreen-content,
 html.better-feed-hide-end-screen-cards .ytp-ce-element,
 html.better-feed-hide-end-screen-cards .ytp-ce-covering-overlay,
+html.better-feed-hide-end-screen-cards .ytp-ce-hide-button-container,
 html.better-feed-hide-end-screen-cards .ytp-fullscreen-grid,
 html.better-feed-hide-end-screen-cards .ytp-modern-videowall-still,
 html.better-feed-hide-end-screen-cards .ytp-suggestion-set {
