@@ -1770,13 +1770,29 @@ function extractVideosFromYouTubeHomeHtml(html) {
   if (!m) throw new Error("no ytInitialData in response");
   const data = JSON.parse(m[1]);
 
-  const lockups = [];
-  (function walk(node) {
+  // Track whether we're inside a richSectionRenderer subtree: those are
+  // YouTube's injected shelf sections ("Breaking news", Trending, Shorts
+  // shelves, …) — editorial/topical content, NOT the user's recommendation
+  // feed (feed videos are richItemRenderers sitting directly in the grid).
+  // Shelf videos are collected separately and only used as a defensive
+  // fallback: if YouTube restructures the page so nothing parses outside a
+  // section, a full grid with shelves beats a failed refresh.
+  const feedLockups = [];
+  const shelfLockups = [];
+  (function walk(node, inShelf) {
     if (!node || typeof node !== "object") return;
-    if (node.lockupViewModel) lockups.push(node.lockupViewModel);
-    if (Array.isArray(node)) { node.forEach(walk); return; }
-    for (const k of Object.keys(node)) walk(node[k]);
-  })(data);
+    if (node.lockupViewModel) {
+      (inShelf ? shelfLockups : feedLockups).push(node.lockupViewModel);
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, inShelf);
+      return;
+    }
+    for (const k of Object.keys(node)) {
+      walk(node[k], inShelf || k === "richSectionRenderer");
+    }
+  })(data, false);
+  const lockups = feedLockups.length > 0 ? feedLockups : shelfLockups;
 
   const videos = [];
   const seen = new Set();
