@@ -302,10 +302,28 @@ function expandChannelKey(key) {
   return key;
 }
 
-function isQuotaError(err) {
-  if (err?.name === "QuotaExceededError") return true;
+// Write-RATE limiting (MAX_WRITE_OPERATIONS_PER_MINUTE /
+// MAX_SUSTAINED_WRITE_OPERATIONS_PER_MINUTE). Distinct from capacity quota:
+// evicting keys cannot help — the eviction is itself another rate-limited
+// write. Treat as transient and never evict for it.
+function isWriteRateLimitError(err) {
   const msg = String(err?.message || err || "");
-  return /quota|MAX_(WRITE|ITEMS|SUSTAINED)/i.test(msg);
+  return /MAX_(WRITE|SUSTAINED)/i.test(msg);
+}
+
+// Byte/item-capacity quota (QUOTA_BYTES, QUOTA_BYTES_PER_ITEM, MAX_ITEMS) —
+// the only failure class that evicting lower-priority keys can fix.
+// Chrome's rate-limit messages also contain the word "quota", so they must
+// be excluded explicitly.
+function isCapacityQuotaError(err) {
+  if (err?.name === "QuotaExceededError") return true;
+  if (isWriteRateLimitError(err)) return false;
+  const msg = String(err?.message || err || "");
+  return /quota|MAX_ITEMS/i.test(msg);
+}
+
+function isQuotaError(err) {
+  return isCapacityQuotaError(err) || isWriteRateLimitError(err);
 }
 
 async function safeSyncSet(items) {
@@ -338,12 +356,14 @@ async function priorityWriteSync(items, priority) {
     await chrome.storage.sync.set(items);
     return true;
   } catch (err) {
-    if (!isQuotaError(err)) {
-      console.warn("sync set failed", err);
+    if (!isCapacityQuotaError(err)) {
+      // Rate-limit and transient failures land here too: eviction can't fix
+      // them, so bail without destroying synced data.
+      if (!isQuotaError(err)) console.warn("sync set failed", err);
       return false;
     }
   }
-  // Quota exceeded — evict lower-priority keys and retry.
+  // Capacity quota exceeded — evict lower-priority keys and retry.
   // Defensive: evicting a key that the payload is about to re-write does
   // nothing for the quota — the same bytes go right back. Drop any
   // evict-list entry that overlaps the payload before we waste a round-trip.
@@ -603,12 +623,19 @@ function dailyTotalSeconds(state) {
   return Number.isFinite(legacy) && legacy > 0 ? legacy : 0;
 }
 
+// Upper bound for a single device's daily seconds bucket. A device can accrue
+// at most 86400 real seconds in a day (2x headroom for clock weirdness); the
+// per-key-MAX merge makes any value sticky for the whole day on every device,
+// so an unclamped corrupt bucket (bad sync payload, storage corruption) would
+// otherwise lock the daily limit everywhere with no way to back it out.
+const DAILY_SECONDS_BUCKET_CAP = 2 * 86400;
+
 function sanitizeSecondsMap(map) {
   if (!map || typeof map !== "object") return null;
   const out = {};
   for (const [k, v] of Object.entries(map)) {
     const n = Number(v);
-    if (k && Number.isFinite(n) && n > 0) out[k] = n;
+    if (k && Number.isFinite(n) && n > 0) out[k] = Math.min(n, DAILY_SECONDS_BUCKET_CAP);
   }
   return out;
 }
@@ -646,7 +673,7 @@ function canonicalDailyState(state) {
   const secondsByDevice = {};
   for (const k of Object.keys(src).sort()) {
     const n = Number(src[k]);
-    if (Number.isFinite(n) && n > 0) secondsByDevice[k] = n;
+    if (Number.isFinite(n) && n > 0) secondsByDevice[k] = Math.min(n, DAILY_SECONDS_BUCKET_CAP);
   }
   return { dayKey: state.dayKey, videoIds, secondsByDevice };
 }
@@ -688,6 +715,18 @@ function dailySecondsBuckets(s) {
   return (Number.isFinite(legacy) && legacy > 0) ? { legacy } : null;
 }
 
+// Bring one (possibly raw-from-sync / legacy-shaped) daily-state operand into
+// canonical form: legacy secondsWatched folded into its bucket, videoIds
+// deduped+sorted, device keys sorted+clamped, junk fields dropped.
+function normalizeDailyOperand(s) {
+  if (!s || typeof s !== "object") return s;
+  return canonicalDailyState({
+    dayKey: s.dayKey,
+    videoIds: s.videoIds,
+    secondsByDevice: dailySecondsBuckets(s) || {}
+  });
+}
+
 // CRDT merge for the daily state across devices. Different day-keys: prefer the
 // side matching THIS device's current day (todayKey, when supplied) so a sibling
 // already rolled into the next local day (timezone skew) can't wipe the day this
@@ -698,19 +737,26 @@ function dailySecondsBuckets(s) {
 // buckets gives the true cross-device total (can't be bypassed by switching
 // devices). Output is canonical (deduped/sorted) so the echo guards converge.
 function mergeDailyState(a, b, todayKey) {
-  if (!a || typeof a !== "object") return (b && typeof b === "object") ? b : null;
-  if (!b || typeof b !== "object") return a;
+  // Every exit goes through normalizeDailyOperand so the promise "output is
+  // canonical" holds on the single-winner paths too — a raw sync operand with
+  // duplicate videoIds (inflating isDailyLimitHit's count) or a legacy
+  // secondsWatched shape must not be written to local verbatim.
+  if (!a || typeof a !== "object") return (b && typeof b === "object") ? normalizeDailyOperand(b) : null;
+  if (!b || typeof b !== "object") return normalizeDailyOperand(a);
   if (a.dayKey !== b.dayKey) {
     const aOk = isValidDayKey(a.dayKey);
     const bOk = isValidDayKey(b.dayKey);
-    if (typeof todayKey === "string") {
-      if (a.dayKey === todayKey) return aOk ? a : (bOk ? b : a);
-      if (b.dayKey === todayKey) return bOk ? b : (aOk ? a : b);
+    let winner;
+    if (typeof todayKey === "string" && a.dayKey === todayKey) {
+      winner = aOk ? a : (bOk ? b : a);
+    } else if (typeof todayKey === "string" && b.dayKey === todayKey) {
+      winner = bOk ? b : (aOk ? a : b);
+    } else if (aOk && bOk) {
+      winner = b.dayKey > a.dayKey ? b : a;
+    } else {
+      winner = aOk ? a : (bOk ? b : a);
     }
-    if (aOk && bOk) return b.dayKey > a.dayKey ? b : a;
-    if (aOk) return a;
-    if (bOk) return b;
-    return a;
+    return normalizeDailyOperand(winner);
   }
   const videoIds = [...new Set([
     ...(Array.isArray(a.videoIds) ? a.videoIds : []),
@@ -721,7 +767,9 @@ function mergeDailyState(a, b, todayKey) {
     if (src && typeof src === "object") {
       for (const [k, v] of Object.entries(src)) {
         const n = Number(v);
-        if (k && Number.isFinite(n) && n > 0) merged[k] = Math.max(merged[k] || 0, n);
+        if (k && Number.isFinite(n) && n > 0) {
+          merged[k] = Math.min(Math.max(merged[k] || 0, n), DAILY_SECONDS_BUCKET_CAP);
+        }
       }
     }
   }
@@ -984,15 +1032,21 @@ const enqueueProgressWrite = makeSerialQueue();
 // In sync we only carry the position (a bare number) since duration is
 // always recoverable from the weekly grid's `duration` field. Renderers and
 // the merge logic accept both shapes.
+//
+// duration >= 0 (not > 0): entries hydrated FROM sync are stored locally as
+// { position, duration: 0 } (sync doesn't carry duration). Requiring a
+// positive duration here would make flushProgressToSync's prune delete a
+// peer device's positions from local AND from the next sync write.
 function isValidProgressEntry(entry) {
   return (
     entry &&
     typeof entry === "object" &&
     typeof entry.position === "number" &&
     isFinite(entry.position) &&
+    entry.position > 0 &&
     typeof entry.duration === "number" &&
     isFinite(entry.duration) &&
-    entry.duration > 0
+    entry.duration >= 0
   );
 }
 
@@ -1375,7 +1429,22 @@ async function pushLocalToSyncIfMissing(sync) {
     typeof local[STORAGE_PROGRESS_KEY] === "object" &&
     Object.keys(local[STORAGE_PROGRESS_KEY]).length > 0
   ) {
-    toPush[STORAGE_PROGRESS_KEY] = local[STORAGE_PROGRESS_KEY];
+    // Same wire shape as flushProgressToSync: prune to the current weekly grid
+    // and ship bare-number positions — never the raw local {position, duration}
+    // map (fatter payload, and stale prior-week entries would re-enter sync).
+    const weeklyIds = new Set(
+      (Array.isArray(local[STORAGE_VIDEOS_KEY]) ? local[STORAGE_VIDEOS_KEY] : [])
+        .map(v => v?.videoId)
+        .filter(Boolean)
+    );
+    const prunedProgress = {};
+    for (const [videoId, entry] of Object.entries(local[STORAGE_PROGRESS_KEY])) {
+      if (weeklyIds.has(videoId)) prunedProgress[videoId] = entry;
+    }
+    const slim = slimProgressForSync(prunedProgress);
+    if (Object.keys(slim).length > 0) {
+      toPush[STORAGE_PROGRESS_KEY] = slim;
+    }
   }
   // Daily state: push the merge of local ∪ sync whenever it differs from sync,
   // so this device's progress reaches sync (covers both "sync missing it" and
@@ -1527,7 +1596,9 @@ async function applySyncChangeToLocal(changes) {
       ? local[STORAGE_HIDDEN_VIDEOS_KEY]
       : [];
     const merged = capSyncedIdList(mergeHiddenIds(localList, changes[STORAGE_HIDDEN_VIDEOS_KEY].newValue));
-    if (merged.length !== localList.length) {
+    // Compare content, not length: at MAX_HIDDEN_PER_TYPE the union + cap-trim
+    // can change WHICH ids are present while the count stays identical.
+    if (JSON.stringify(merged) !== JSON.stringify(localList)) {
       updates[STORAGE_HIDDEN_VIDEOS_KEY] = merged;
     }
   }
@@ -1538,7 +1609,7 @@ async function applySyncChangeToLocal(changes) {
     // Expand sync-shrunk channel keys back to full URLs before merging.
     const incoming = changes[STORAGE_HIDDEN_CHANNELS_KEY].newValue.map(expandChannelKey);
     const merged = capSyncedIdList(mergeHiddenIds(localList, incoming));
-    if (merged.length !== localList.length) {
+    if (JSON.stringify(merged) !== JSON.stringify(localList)) {
       updates[STORAGE_HIDDEN_CHANNELS_KEY] = merged;
     }
   }
@@ -1547,7 +1618,7 @@ async function applySyncChangeToLocal(changes) {
       ? local[STORAGE_WATCHED_VIDEOS_KEY]
       : [];
     const merged = capSyncedIdList(mergeHiddenIds(localList, changes[STORAGE_WATCHED_VIDEOS_KEY].newValue));
-    if (merged.length !== localList.length) {
+    if (JSON.stringify(merged) !== JSON.stringify(localList)) {
       updates[STORAGE_WATCHED_VIDEOS_KEY] = merged;
     }
   }
@@ -1812,15 +1883,17 @@ function filterHiddenVideos(videos, hidden) {
   });
 }
 
-// Pick the weekly grid: dedupe, drop hidden, prefer fully-populated entries
-// (have view-count metadata + avatar + duration) then backfill to videoCount.
-function chooseWeeklyVideos(videos, videoCount, hidden = null) {
+// Pick the weekly grid: dedupe, prefer fully-populated entries (have
+// view-count metadata + avatar + duration) then backfill to videoCount.
+// Hidden filtering is the CALLER's job (background.js pre-filters the pool
+// with filterHiddenVideos before choosing) — no hidden param here, so the
+// filter can't silently run twice.
+function chooseWeeklyVideos(videos, videoCount) {
   const seen = new Set();
 
   const valid = videos.filter(video => {
     if (!video.title || !video.videoId) return false;
     if (seen.has(video.videoId)) return false;
-    if (hidden && isVideoHidden(video, hidden)) return false;
 
     seen.add(video.videoId);
     return true;
@@ -1870,5 +1943,55 @@ function channelDisplayFromKey(key) {
   if (handle) return `@${handle[1]}`;
   const ucId = key.match(/\/channel\/(UC[^/?#&]+)/i);
   if (ucId) return ucId[1];
+  // name:-fallback keys (channels hidden before a URL was known) carry the
+  // display name directly. Previously only popup.js applied this tier, so the
+  // same hidden channel labelled "foo" there but "Hidden channel" in options.
+  if (key.startsWith("name:")) return key.slice(5);
+  // Last resort for URL-form keys with no handle/UC id (e.g. legacy
+  // /c/<name>): the final path segment beats showing the whole raw URL.
+  if (key.includes("/")) return key.split("/").filter(Boolean).pop() || null;
   return null;
+}
+
+// Backfill titles for hidden videos whose metadata didn't survive (typical
+// after a reinstall — the hidden ID lists sync, their metadata blob doesn't).
+// ONE copy shared by options.js and popup.js (they were verbatim duplicates,
+// differing only in which list re-render they triggered — hence onUpdated).
+// Results persist via modifyHidden so the next render reads them from storage
+// and the recovered metadata syncs back across devices. Ids with no oEmbed
+// data (deleted/private/age-gated) are negative-cached via _oembedFailed so
+// they aren't re-fetched on every render; the marker clears automatically
+// when the item is unhidden (its metadata entry is deleted).
+async function backfillMissingHiddenVideoMetadata(onUpdated) {
+  const { videos, metadata } = await getHiddenItemsWithMetadata();
+  const existing = metadata || {};
+  const missing = [...videos].filter(id => id && !existing[id]?.title && !existing[id]?._oembedFailed);
+  if (missing.length === 0) return;
+
+  const fetched = {};
+  const failed = [];
+  for (let i = 0; i < missing.length; i += OEMBED_CONCURRENCY) {
+    const batch = missing.slice(i, i + OEMBED_CONCURRENCY);
+    const results = await Promise.all(batch.map(fetchVideoMetadataFromOEmbed));
+    for (let j = 0; j < batch.length; j++) {
+      if (results[j]) fetched[batch[j]] = results[j];
+      else failed.push(batch[j]);
+    }
+  }
+  if (Object.keys(fetched).length === 0 && failed.length === 0) return;
+
+  await modifyHidden(state => {
+    if (!state.metadata) state.metadata = {};
+    for (const [id, m] of Object.entries(fetched)) {
+      if (!state.metadata[id]?.title) state.metadata[id] = { type: "video", ...m };
+    }
+    for (const id of failed) {
+      if (!state.metadata[id]?.title) {
+        state.metadata[id] = { ...(state.metadata[id] || {}), type: "video", title: "", _oembedFailed: true };
+      }
+    }
+  });
+  if (Object.keys(fetched).length > 0 && typeof onUpdated === "function") {
+    await onUpdated();
+  }
 }

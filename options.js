@@ -113,12 +113,14 @@ function applyDailyLimitModeUI() {
 
 // Reads the daily-limit hours+minutes inputs, floored at 0.
 function readHourMinutePair() {
-  const h = Math.max(0, Number(document.getElementById("max-hours-per-day").value) || 0);
-  // Clamp minutes to 0–59: this is a minutes component (HTML max=59 caps the
-  // spinner, but typed/pasted values aren't), so a stray "90" would be saved
-  // then re-displayed as "1h 30m" on reload — a confusing field jump. Excess
-  // belongs in the hours field.
-  const m = Math.max(0, Math.min(59, Number(document.getElementById("max-minutes-per-day").value) || 0));
+  let h = Math.max(0, Number(document.getElementById("max-hours-per-day").value) || 0);
+  // Normalize minutes overflow into the hours field instead of clamping it
+  // away: a typed "90" minutes (HTML max=59 caps the spinner, not typed or
+  // pasted values) means 1h30m — silently saving 59m would shrink the limit
+  // the user actually asked for.
+  let m = Math.max(0, Number(document.getElementById("max-minutes-per-day").value) || 0);
+  h += Math.floor(m / 60);
+  m = m % 60;
   return { h, m };
 }
 
@@ -284,8 +286,16 @@ async function autoSave() {
   // Stamping after (old behavior) let the onChanged echo-guard read a stale
   // timestamp, so the tab treated its own write as a remote change and reloaded
   // the form mid-edit — guaranteed on the first edit, when the ts was still 0.
+  // Spread the CURRENT stored settings under the form fields: saveSettings
+  // sanitizes the object it's given with no merge, so any field this form
+  // doesn't own (workCustomMinutes, persisted by content.js when the user
+  // starts a custom-length work session) would otherwise be reset to its
+  // default on every checkbox toggle. Read before the stamp so the echo-guard
+  // window isn't widened by this extra await.
+  const storedSettings = await getSettings();
   lastLocalSettingsWriteTs = Date.now();
   await saveSettings({
+    ...storedSettings,
     enabled: document.getElementById("extension-enabled").checked,
     weeklyHomeEnabled: document.getElementById("weekly-home-enabled").checked,
     redirectHomeEnabled: document.getElementById("redirect-home-enabled").checked,
@@ -483,7 +493,16 @@ document.getElementById("refresh-weekly-btn").addEventListener("click", async ()
   // true, then nudge the background — watched flags + progress survive. (An empty
   // VIDEOS list is length-0-guarded in hydrate, so it won't clobber peers.)
   await chrome.storage.local.set({ [STORAGE_VIDEOS_KEY]: [], [STORAGE_REFRESH_AFTER_KEY]: 0 });
-  try { await chrome.runtime.sendMessage({ type: "better-feed-ensure-fresh" }); } catch (_) {}
+  // Drop the sync-side copies too: hydrateFromSync restores sync videos when
+  // local is empty and a sync refreshAfter > 0 beats the local 0, so any
+  // hydrate that lands before the background's fetch completes (offline,
+  // error cooldown, browser restart) would silently resurrect the old grid
+  // and cancel this forced refresh.
+  await safeSyncRemove([STORAGE_VIDEOS_KEY, STORAGE_REFRESH_AFTER_KEY]);
+  // force: a user-initiated refresh bypasses the background's transient-error
+  // cooldown — the grid was just cleared, so a swallowed nudge would leave it
+  // empty until the next 5-minute alarm.
+  try { await chrome.runtime.sendMessage({ type: "better-feed-ensure-fresh", force: true }); } catch (_) {}
   showStatus("Refreshing — reload YouTube tab if grid doesn't update");
   setTimeout(() => { btn.disabled = false; }, 800);
 });
@@ -533,27 +552,18 @@ document.getElementById("force-add-video-btn").addEventListener("click", async (
       return;
     }
 
-    // Write a pure stub — no title/channel/avatar/metrics, no members check.
-    // The content script's rebuildVideoMetadataIfNeeded runs automatically
-    // on the storage change and fetches everything from real YouTube data:
-    // oEmbed for title/channel, the watch page for view count + duration +
-    // publish date + members-only flag, and the channel page for the avatar.
+    // Write a pure stub (shared.js stubVideoFromId — same shape sync hydration
+    // uses). The content script's rebuildVideoMetadataIfNeeded runs
+    // automatically on the storage change and fetches everything from real
+    // YouTube data: oEmbed for title/channel, the watch page for view count +
+    // duration + publish date + members-only flag, and the channel page for
+    // the avatar.
     //
     // PREPEND (not append): the grid render slices to settings.videoCount,
     // so an appended item past that index would be invisible. Prepending
     // puts the stub at the top of the array so it always shows.
-    const stub = {
-      videoId,
-      title: "",
-      channelName: "",
-      channelUrl: "",
-      avatar: "",
-      duration: "",
-      metadata: "",
-      membersOnly: false
-    };
     await chrome.storage.local.set({
-      [STORAGE_VIDEOS_KEY]: [stub, ...videos]
+      [STORAGE_VIDEOS_KEY]: [stubVideoFromId(videoId), ...videos]
     });
 
     input.value = "";
@@ -684,47 +694,8 @@ function initialPageFromHash() {
   return valid.includes(hash) ? hash : "refresh";
 }
 
-// fetchVideoMetadataFromOEmbed + OEMBED_CONCURRENCY live in shared.js so
-// the popup, options page, and content script all use the same fetcher.
-// Results are persisted via modifyHidden so the next render reads them from
-// storage and so the recovered metadata syncs back across devices.
-
-async function backfillMissingHiddenVideoMetadata() {
-  const { videos, metadata } = await getHiddenItemsWithMetadata();
-  const existing = metadata || {};
-  // Skip ids already known to have no oEmbed data (deleted/private/age-gated) —
-  // without this negative cache they'd be re-fetched on every render. Mirrors
-  // popup.js backfillMissingHiddenVideoMetadata.
-  const missing = [...videos].filter(id => id && !existing[id]?.title && !existing[id]?._oembedFailed);
-  if (missing.length === 0) return;
-
-  const fetched = {};
-  const failed = [];
-  for (let i = 0; i < missing.length; i += OEMBED_CONCURRENCY) {
-    const batch = missing.slice(i, i + OEMBED_CONCURRENCY);
-    const results = await Promise.all(batch.map(fetchVideoMetadataFromOEmbed));
-    for (let j = 0; j < batch.length; j++) {
-      if (results[j]) fetched[batch[j]] = results[j];
-      else failed.push(batch[j]);
-    }
-  }
-  if (Object.keys(fetched).length === 0 && failed.length === 0) return;
-
-  await modifyHidden(state => {
-    if (!state.metadata) state.metadata = {};
-    for (const [id, m] of Object.entries(fetched)) {
-      if (!state.metadata[id]?.title) state.metadata[id] = { type: "video", ...m };
-    }
-    // Negative cache: mark definitively-unavailable ids so they aren't retried
-    // (cleared automatically when the item is unhidden — its metadata is deleted).
-    for (const id of failed) {
-      if (!state.metadata[id]?.title) {
-        state.metadata[id] = { ...(state.metadata[id] || {}), type: "video", title: "", _oembedFailed: true };
-      }
-    }
-  });
-  if (Object.keys(fetched).length > 0) renderHiddenItems();
-}
+// backfillMissingHiddenVideoMetadata lives in shared.js (one copy shared with
+// popup.js; this page passes renderHiddenItems as the onUpdated re-render).
 
 // channelDisplayFromKey lives in shared.js (shared with popup.js).
 
@@ -782,7 +753,7 @@ async function renderHiddenItems() {
   // metadata (typical after a reinstall). Fires in the background so the
   // initial render isn't blocked; renderHiddenItems is invoked again once
   // results are persisted.
-  backfillMissingHiddenVideoMetadata().catch(() => {});
+  backfillMissingHiddenVideoMetadata(renderHiddenItems).catch(() => {});
 }
 
 function buildHiddenRow({ id, kind, title, sub }) {
@@ -851,6 +822,16 @@ document.getElementById("clear-hidden-channels-btn").addEventListener("click", a
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+  // Track the Debug fake-clock like content.js/background.js do. Without
+  // this, every time-dependent readout on this page (day key via getNow,
+  // grace remaining, the watching lock) runs on the REAL clock while the
+  // YouTube tabs run on the fake one — the readout shows empty state and
+  // the watching-locked sections unlock during an active fake-day binge.
+  applyFakeNowOffsetChange(changes);
+  if (STORAGE_FAKE_NOW_OFFSET_KEY in changes) {
+    renderDailyStateReadout();
+    applyWatchingLockToAllSections();
+  }
   if (STORAGE_DAILY_STATE_KEY in changes || STORAGE_DAILY_GRACE_KEY in changes || SETTINGS_KEY in changes) {
     renderDailyStateReadout();
   }
@@ -1138,6 +1119,11 @@ document.addEventListener("click", event => {
 
 (async () => {
   await migrateLegacyStorageKeys();
+  // Adopt any active Debug fake-clock BEFORE the time-dependent reads below
+  // (day key, daily state, watching lock) — content.js and background.js load
+  // it at init too; skipping it here would split this page onto the real
+  // clock while the rest of the extension runs on the fake one.
+  await loadFakeNowOffset();
   await hydrateFromSync();
   await loadSettings();
   await renderDailyStateReadout();

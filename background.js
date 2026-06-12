@@ -216,14 +216,27 @@ chrome.tabs.onRemoved.addListener(() => {
 });
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
-  if (!changeInfo.url) return;
-  // If the tab is navigating to another YouTube URL, it's clearly not
-  // leaving YouTube — skip the cleanup check. Firefox can briefly return
-  // zero matches from chrome.tabs.query mid-navigation, which would
-  // otherwise wipe the active mode incorrectly and bring the mode picker
-  // back on the return trip.
-  if (/^https?:\/\/(www\.)?youtube\.com(\/|$)/i.test(changeInfo.url)) return;
-  clearModeIfNoYouTubeTabs();
+  // Without the "tabs" permission, changeInfo.url is only populated for
+  // host-permitted (youtube.com) URLs — a navigation AWAY from YouTube
+  // arrives with NO url. The old `if (!changeInfo.url) return` guard skipped
+  // exactly the event this listener exists for, so the mode only ever
+  // cleared on tab close, never on navigate-away.
+  if (changeInfo.url) {
+    // Navigating to another YouTube URL — clearly not leaving YouTube. Skip
+    // the cleanup check: Firefox can briefly report zero youtube.com tabs
+    // mid-navigation, which would wipe the active mode and re-show the mode
+    // picker on the return trip.
+    if (/^https?:\/\/(www\.)?youtube\.com(\/|$)/i.test(changeInfo.url)) return;
+    clearModeIfNoYouTubeTabs();
+    return;
+  }
+  // No url: a non-YouTube navigation (possible leave) or a non-navigation
+  // update (title, favicon, audible…). Only the loading phase can be a
+  // navigation; clearModeIfNoYouTubeTabs double-checks via an actual
+  // tabs.query, so a spurious call here is a cheap no-op.
+  if (changeInfo.status === "loading") {
+    clearModeIfNoYouTubeTabs();
+  }
 });
 
 // Promise-return listener pattern. In Firefox, returning a Promise from the
@@ -235,7 +248,12 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
 // the in-flight lock + due-check inside ensureFreshVideos.
 chrome.runtime.onMessage.addListener((msg, _sender) => {
   if (msg && msg.type === "better-feed-ensure-fresh") {
-    return ensureFreshVideos("message")
+    // msg.force (options' "Refresh weekly videos now") bypasses the error
+    // cooldown: that button just cleared the local grid, so swallowing its
+    // nudge would strand the user on an empty grid until the next alarm.
+    // Content's automatic per-load nudge stays non-force so a failing
+    // refresh isn't re-fetched on every page load.
+    return ensureFreshVideos("message", { force: !!msg.force })
       .then(() => ({ ok: true }))
       .catch(err => ({ ok: false, error: String(err?.message || err) }));
   }
@@ -258,13 +276,13 @@ function setRefreshStatus(state, extra = {}) {
   });
 }
 
-async function ensureFreshVideos(reason) {
+async function ensureFreshVideos(reason, { force = false } = {}) {
   if (refreshInFlight) return refreshInFlight;
-  refreshInFlight = runRefresh(reason).finally(() => { refreshInFlight = null; });
+  refreshInFlight = runRefresh(reason, { force }).finally(() => { refreshInFlight = null; });
   return refreshInFlight;
 }
 
-async function runRefresh(reason) {
+async function runRefresh(reason, { force = false } = {}) {
   // Load the fake-now offset first so every refresh — regardless of which entry
   // point woke the SW (message / alarm / startup / storage) — computes
   // isRefreshDue, the in-flight/error cooldowns, and getNextRefreshTime against
@@ -306,8 +324,11 @@ async function runRefresh(reason) {
   // trigger. An all-live or unparseable home throws below and never advances
   // refreshAfter, so without this it would re-issue a credentialed GET on
   // every alarm/storage-change/reload nudge. The 5-minute alarm still retries
-  // once this cooldown elapses (cooldown < alarm period).
+  // once this cooldown elapses (cooldown < alarm period). A user-initiated
+  // force (options' refresh button) skips the backoff — only the cooldown,
+  // not the in-flight single-flight guard above.
   if (
+    !force &&
     status &&
     status.state === "error" &&
     typeof status.failedAt === "number" &&
@@ -336,9 +357,8 @@ async function runRefresh(reason) {
       settings.videoCount + REFRESH_BACKFILL_BUFFER,
       MAX_WEEKLY_VIDEOS
     );
-    // `visible` is already filterHiddenVideos'd above, so don't re-pass hidden
-    // (chooseWeeklyVideos would just re-run isVideoHidden on an already-filtered
-    // list — dead work). hidden is still used for the filter at the top.
+    // `visible` is already filterHiddenVideos'd above — hidden filtering is
+    // this caller's job by design (chooseWeeklyVideos only dedupes and picks).
     const chosen = chooseWeeklyVideos(visible, target);
     if (chosen.length === 0) throw new Error("0 usable videos parsed");
 

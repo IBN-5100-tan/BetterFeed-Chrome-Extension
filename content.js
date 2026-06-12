@@ -695,14 +695,11 @@ function positionPopoverBelowButton(popover, refElement) {
   popover.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
 }
 
+// Same routing as the render container lookup, by construction — if YouTube
+// renames the home browse selector, both the page test and the container
+// lookup move together.
 function isHomePage() {
-  if (location.pathname === "/") {
-    return !!document.querySelector('ytd-browse[page-subtype="home"]');
-  }
-  if (isMarkerPage()) {
-    return !!document.querySelector("ytd-browse");
-  }
-  return false;
+  return !!getHomeBrowse();
 }
 
 function applyMarkerModeClass() {
@@ -1125,11 +1122,23 @@ async function applyVideoMetricsToStorage(metricsByVideoId) {
     const nextIsLive = v.isLive || !!m.isLive;
     const nextChecked = Date.now();
 
+    // A successful fetch can still leave the entry stub-shaped (watch page
+    // with no views/date or no length). Count those toward
+    // MAX_METRICS_ATTEMPTS exactly like failures — otherwise the stub filter
+    // re-selects the video and its watch page (~250 KB) is re-downloaded on
+    // every page load forever.
+    const stillMetricsStub = !nextMetadata || !nextDuration;
+    const nextAttempts = (v.metricsAttempts || 0) + (stillMetricsStub ? 1 : 0);
+
     if (
       nextDuration === v.duration &&
       nextMetadata === v.metadata &&
       nextMembersOnly === !!v.membersOnly &&
-      nextIsLive === !!v.isLive &&
+      // Strict compare on purpose: isLive === undefined must force a write
+      // that resolves it to a boolean, or the v.isLive === undefined stub
+      // filter re-selects this video on every load.
+      nextIsLive === v.isLive &&
+      nextAttempts === (v.metricsAttempts || 0) &&
       v.membersOnlyCheckedAt
     ) {
       return v;
@@ -1141,6 +1150,7 @@ async function applyVideoMetricsToStorage(metricsByVideoId) {
       metadata: nextMetadata || "",
       membersOnly: nextMembersOnly,
       isLive: nextIsLive,
+      metricsAttempts: nextAttempts,
       membersOnlyCheckedAt: nextChecked
     };
   });
@@ -1421,16 +1431,7 @@ async function refreshVisibleVideosAfterHide() {
     return;
   }
 
-  const renderable = (Array.isArray(stored.videos) ? stored.videos : []).filter(v => v?.videoId);
-  // Same ordering as renderFromStorage: live-filter the POOL first (so a live
-  // stream is backfilled from the reserve), THEN lock the first videoCount as
-  // the fixed set, THEN hidden-filter (which shrinks, never backfills).
-  let pool = renderable;
-  if (settings.excludeLiveVideos !== false) {
-    pool = pool.filter(v => !videoLooksLive(v));
-  }
-  const weeklySet = pool.slice(0, settings.videoCount);
-  const visible = filterHiddenVideos(weeklySet, hidden);
+  const { visible } = computeVisibleWeeklySet(stored.videos, settings, hidden);
 
   // The whole weekly set is hidden — hand off to update() so renderFromStorage
   // shows the loader / retry / nudge rather than an empty grid.
@@ -1440,6 +1441,31 @@ async function refreshVisibleVideosAfterHide() {
   }
 
   await renderCustomHome(visible, { preserveScroll: true });
+}
+
+// THE fixed-weekly-set pipeline — single copy on purpose, the ordering is
+// load-bearing and is shared by renderFromStorage (navigation renders) and
+// refreshVisibleVideosAfterHide (hide-triggered re-renders):
+//  1. Render every video that has a videoId. A stub whose title hasn't
+//     hydrated yet still shows a videoId-derived thumbnail and fills in its
+//     title/metadata progressively via rebuildVideoMetadataIfNeeded. Gating
+//     on EVERY title being present would wedge a fully-synced device (whose
+//     grid arrives as all-stubs) on a permanent loader when oEmbed is down.
+//  2. Drop live streams from the candidate POOL first, so a late-detected
+//     live video is BACKFILLED by a fresh one from the over-scrape reserve —
+//     we always want videoCount watchable videos in place.
+//  3. Lock in the FIXED weekly set: the first videoCount of that pool.
+//  4. Hiding removes from THIS set WITHOUT backfilling — once you have your
+//     videos for the week, hiding them must not surface new ones until the
+//     next scheduled refresh.
+function computeVisibleWeeklySet(storedVideos, settings, hidden) {
+  const renderable = (Array.isArray(storedVideos) ? storedVideos : []).filter(v => v?.videoId);
+  let pool = renderable;
+  if (settings.excludeLiveVideos !== false) {
+    pool = pool.filter(v => !videoLooksLive(v));
+  }
+  const weeklySet = pool.slice(0, settings.videoCount);
+  return { weeklySet, visible: filterHiddenVideos(weeklySet, hidden) };
 }
 
 /* ---------- METADATA FORMATTING ---------- */
@@ -1527,27 +1553,7 @@ async function renderFromStorage() {
     chrome.storage.local.get(STORAGE_REFRESH_STATUS_KEY)
   ]);
 
-  const storedVideos = Array.isArray(stored.videos) ? stored.videos : [];
-  // Render every video that has a videoId. A stub whose title hasn't hydrated
-  // yet still shows a videoId-derived thumbnail and fills in its title/metadata
-  // progressively via rebuildVideoMetadataIfNeeded. Gating on EVERY title being
-  // present (the old every() check) would wedge a fully-synced device — whose
-  // grid arrives as all-stubs — on a permanent "Refreshing" loader whenever
-  // oEmbed can't reach YouTube, even though the thumbnails are renderable.
-  const renderable = storedVideos.filter(v => v?.videoId);
-  // 1. Drop live streams from the candidate POOL first, so a late-detected live
-  //    video is BACKFILLED by a fresh one from the over-scrape reserve — we
-  //    always want videoCount watchable videos in place.
-  let pool = renderable;
-  if (settings.excludeLiveVideos !== false) {
-    pool = pool.filter(v => !videoLooksLive(v));
-  }
-  // 2. Lock in the FIXED weekly set: the first videoCount of the live-filtered
-  //    pool. 3. Hiding removes from THIS set WITHOUT backfilling — once you have
-  //    your videos for the week, hiding them must not surface new ones until the
-  //    next scheduled refresh.
-  const weeklySet = pool.slice(0, settings.videoCount);
-  const visible = filterHiddenVideos(weeklySet, hidden);
+  const { weeklySet, visible } = computeVisibleWeeklySet(stored.videos, settings, hidden);
   if (visible.length > 0) {
     await renderCustomHome(visible);
     return;
@@ -1665,6 +1671,13 @@ async function onHomePage() {
     // videos + STORAGE_REFRESH_STATUS_KEY; this paints whatever's there (grid /
     // loader / quiet retry) and nudges the background once if a refresh is due.
     await renderFromStorage();
+  } catch (err) {
+    // A rejected storage read (e.g. "Extension context invalidated" after an
+    // extension reload orphans this script) must never strand the pre-ready
+    // fade — that's a permanently dark, pointer-events:none tab. Lift the
+    // gate and let YouTube's own shell show instead.
+    console.warn("BetterFeed: onHomePage render failed", err);
+    markModeReady();
   } finally {
     updateInProgress = false;
     // If anything tried to run an update while this one was in-flight, honor
@@ -1823,6 +1836,11 @@ function renderLoadingMessage(text) {
   const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
+  // Invalidate any in-flight renderCustomHome: without this bump, an older
+  // grid render parked on its storage reads would resume, pass its
+  // myToken === renderToken check, and silently replace this message with a
+  // stale grid.
+  ++renderToken;
   removeCustomHome();
 
   const container = document.createElement("div");
@@ -2433,17 +2451,11 @@ function remainingLockMs() {
 }
 
 function formatSessionRemaining(ms) {
-  const total = Math.ceil(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const pad = n => String(n).padStart(2, "0");
-  if (h > 0) return `${h}:${pad(m)}:${pad(s)} remaining`;
-  return `${m}:${pad(s)} remaining`;
+  return `${formatTimeRemainingShort(ms)} remaining`;
 }
 
-// Same as formatSessionRemaining but without the trailing "remaining" — used
-// when the surrounding label already names what the time refers to.
+// H:MM:SS / M:SS, no trailing label — formatSessionRemaining wraps this when
+// a standalone "remaining" suffix is wanted.
 function formatTimeRemainingShort(ms) {
   const total = Math.ceil(ms / 1000);
   const h = Math.floor(total / 3600);
@@ -3706,6 +3718,8 @@ function renderSeeYouTomorrow(settings) {
   const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
+  // Invalidate any in-flight renderCustomHome (see renderLoadingMessage).
+  ++renderToken;
   removeCustomHome();
 
   const container = document.createElement("div");
@@ -3736,6 +3750,8 @@ function renderWorkPlaceholder() {
   const browse = ensureBrowseOrReturn();
   if (!browse) return;
 
+  // Invalidate any in-flight renderCustomHome (see renderLoadingMessage).
+  ++renderToken;
   removeCustomHome();
 
   const container = document.createElement("div");
@@ -3779,6 +3795,16 @@ ensureThemeObserver();
 // the mini-guide to flash. The IIFE below calls it after loadCurrentMode().
 
 (async () => {
+  // Watchdog for the pre-ready fade (set by early.js, lifted by
+  // markModeReady): if anything in init or the first render rejects before
+  // markModeReady runs — e.g. chrome.storage throwing "Extension context
+  // invalidated" after an extension reload — the tab would otherwise stay
+  // dark and unclickable forever. Removing the class is idempotent, so this
+  // is a no-op on the healthy path (it's long gone by 10s).
+  setTimeout(() => {
+    document.documentElement.classList.remove("better-feed-pre-ready");
+  }, 10000);
+
   // Rebrand migration: copy any leftover ytWeekly* keys to betterFeed* on
   // the first load after the rename. Must run BEFORE the loadX() calls below
   // so they read from the migrated keys, not the empty new ones.
@@ -3823,7 +3849,12 @@ ensureThemeObserver();
   // If hydrate just landed ID-only stub videos in local storage, fill in
   // titles/channels via oEmbed. Fire-and-forget; storage onChanged re-renders.
   rebuildVideoMetadataIfNeeded().catch(() => {});
-})();
+})().catch(err => {
+  // Same rationale as the watchdog above: a failed init must not leave the
+  // pre-ready gate down.
+  console.warn("BetterFeed: init failed", err);
+  markModeReady();
+});
 
 async function maybeRedirectSpaHome() {
   // SPA-navigation safety net: the dNR redirect rule is main_frame-scoped and
@@ -3860,10 +3891,17 @@ window.addEventListener("pagehide", () => {
   // Best-effort: commit the last (up to ~5s) of pending watch-seconds and push
   // the daily state immediately, so they aren't lost locally and the debounced
   // seconds reach sync on a hard close. Same unload caveat as flushProgressToSync.
+  // The push must be sequenced AFTER the flush commits (mirroring
+  // stopWatchTracking) — pushed first it would ship the pre-flush state, and
+  // the debounced timer the flush arms never fires in an unloading page.
   if (watchTrackPendingSeconds > 0) {
-    getSettings().then(s => flushWatchSeconds(s)).catch(() => {});
+    getSettings()
+      .then(s => flushWatchSeconds(s))
+      .catch(() => {})
+      .then(() => scheduleDailyStateSync({ immediate: true }));
+  } else {
+    scheduleDailyStateSync({ immediate: true });
   }
-  scheduleDailyStateSync({ immediate: true });
 });
 
 document.addEventListener("yt-navigate-finish", () => {
@@ -4232,13 +4270,17 @@ async function tickWatchedMarking() {
   //  - The player itself signals it ended (reliable when it fires, but YouTube
   //    can swap the video before the event lands).
   //  - 20s or less remaining (the main rule for medium/long videos).
-  //  - ≥ 90% of the duration played (handles short videos where the 20s rule
-  //    can never fire, e.g. a 15-second clip).
+  //  - ≥ 90% of the duration played, ONLY for videos at or under the 20s
+  //    threshold where the remaining-time rule is gated off (e.g. a
+  //    15-second clip). Unconditioned, the 90% clause would preempt the 20s
+  //    rule on anything longer than ~3m20s — marking a 2-hour video watched
+  //    (and halting progress-resume writes) with 12 minutes still to go.
   const reachedThreshold =
     videoEl.ended ||
     (duration > WATCHED_MARK_REMAINING_THRESHOLD_SEC &&
       remaining <= WATCHED_MARK_REMAINING_THRESHOLD_SEC) ||
-    currentTime / duration >= 0.9;
+    (duration <= WATCHED_MARK_REMAINING_THRESHOLD_SEC &&
+      currentTime / duration >= 0.9);
   if (!reachedThreshold) return;
   stopWatchedMarking();
   await modifyWatched(set => set.add(expectedVideoId));
@@ -4257,7 +4299,7 @@ function isChannelLinkHref(href) {
   );
 }
 
-function showChannelConfirm(targetUrl) {
+function showChannelConfirm(targetUrl, { newTab = false } = {}) {
   if (document.getElementById(CHANNEL_CONFIRM_ID)) return;
 
   const overlay = document.createElement("div");
@@ -4285,7 +4327,14 @@ function showChannelConfirm(targetUrl) {
   yesBtn.textContent = "Yes, go to channel";
   yesBtn.addEventListener("click", () => {
     overlay.remove();
-    window.location.href = targetUrl;
+    // Honor the original gesture: a middle-click meant "open in a new tab" —
+    // navigating the current tab instead would clobber the page the user
+    // deliberately kept.
+    if (newTab) {
+      window.open(targetUrl, "_blank");
+    } else {
+      window.location.href = targetUrl;
+    }
   });
 
   buttons.appendChild(noBtn);
@@ -4301,6 +4350,12 @@ function showChannelConfirm(targetUrl) {
 
 function onWorkModeLinkClick(event) {
   if (!isWorkLikeMode(currentMode)) return;
+
+  // auxclick fires for middle AND right button. Only left (0, via click) and
+  // middle (1, open-in-new-tab intent) are navigations to intercept —
+  // swallowing right-click (2) would pop the confirm over a context-menu /
+  // copy-link gesture that never navigates.
+  if (event.button !== 0 && event.button !== 1) return;
 
   const link = event.target.closest && event.target.closest("a[href]");
   if (!link) return;
@@ -4319,7 +4374,7 @@ function onWorkModeLinkClick(event) {
 
   event.preventDefault();
   event.stopPropagation();
-  showChannelConfirm(link.href);
+  showChannelConfirm(link.href, { newTab: event.button === 1 });
 }
 
 document.addEventListener("click", onWorkModeLinkClick, { capture: true });
@@ -4425,15 +4480,30 @@ async function onGraceChosen(type, seconds) {
 let graceExpirationTimer = null;
 
 async function armGraceExpirationTimer() {
+  // The armed timer is the ONLY thing that force-ends an expired minutes
+  // grace mid-video (the per-tick check was removed as dead code), so a
+  // clear-without-rearm here would let the user re-grant themselves grace
+  // indefinitely via the limit popup. Two rules guard that:
+  //  - the mode early-return KEEPS the existing timer (a grace storage event
+  //    landing during a transient mode-null must not strand the grace; the
+  //    callback re-checks mode/grace itself, so a kept timer is always safe);
+  //  - the clear happens only AFTER the storage reads succeed (a rejected
+  //    read keeps the timer too).
+  if (!isWatchModeActive()) return;
+  let settings, grace;
+  try {
+    settings = await getSettings();
+    grace =
+      settings.enabled && settings.dailyLimitEnabled
+        ? await getDailyGrace(settings)
+        : null;
+  } catch (_) {
+    return;
+  }
   if (graceExpirationTimer) {
     clearTimeout(graceExpirationTimer);
     graceExpirationTimer = null;
   }
-  if (!isWatchModeActive()) return;
-  const settings = await getSettings();
-  if (!settings.enabled || !settings.dailyLimitEnabled) return;
-
-  const grace = await getDailyGrace(settings);
   if (!grace || grace.type !== "minutes") return;
 
   const remaining = grace.expiresAt - getNow();
@@ -4446,6 +4516,7 @@ async function armGraceExpirationTimer() {
 
   graceExpirationTimer = setTimeout(async () => {
     graceExpirationTimer = null;
+    if (!isWatchModeActive()) return;
     const current = await getDailyGrace(settings);
     if (!current || current.type !== "minutes") return;
     if (getNow() < current.expiresAt) return;
@@ -4479,6 +4550,29 @@ async function maybeEnforceGraceOnNavigation() {
       if (isDailyLimitHit(state, settings)) redirectToBlockedMarker();
     }
   }
+}
+
+// A watching tab flushes daily seconds every ~5s; a sibling home tab doing a
+// full update() (grid teardown + ~9 storage reads + image re-decode) for every
+// bump would be sustained 5-second jank for a visually identical result. The
+// home render only depends on daily state via the limit verdict and the day
+// key — re-render only when one of those flips; the popover (which shows the
+// live counts) is refreshed by the caller regardless.
+async function maybeUpdateForDailyStateChange(change) {
+  try {
+    const prev = change?.oldValue;
+    const next = change?.newValue;
+    if (prev && next && typeof prev === "object" && typeof next === "object") {
+      const settings = await getSettings();
+      const dayChanged = prev.dayKey !== next.dayKey;
+      const hitChanged =
+        isDailyLimitHit(prev, settings) !== isDailyLimitHit(next, settings);
+      if (!dayChanged && !hitChanged) return;
+    }
+  } catch (_) {
+    // On any doubt, fall through to the full re-render.
+  }
+  update();
 }
 
 chrome.storage.onChanged.addListener(async (changes, area) => {
@@ -4546,7 +4640,7 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
   }
 
   if (STORAGE_DAILY_STATE_KEY in changes) {
-    update();
+    maybeUpdateForDailyStateChange(changes[STORAGE_DAILY_STATE_KEY]).catch(() => {});
     refreshDailyLimitPopover();
   }
 
@@ -4585,6 +4679,7 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
     if (!currentMode) {
       removeModeSwitcher();
       await stopWatchTracking().catch(() => {});
+      stopWatchedMarking();
       await applyFeatureSettings();
       update();
       maybeShowModePicker();
@@ -4593,11 +4688,16 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
       ensureModeSwitcher();
       await applyFeatureSettings();
       update();
+      // Mirror onModePicked: watched-marking must follow the mode too, or a
+      // /watch tab adopting a sibling tab's switch keeps (or misses) the
+      // auto-mark/progress interval until its next navigation.
       if (currentMode === MODE_WATCH) {
         maybeStartWatchTracking();
+        maybeStartWatchedMarking();
         armGraceExpirationTimer();
       } else {
         await stopWatchTracking().catch(() => {});
+        stopWatchedMarking();
       }
     }
   }

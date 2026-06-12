@@ -54,44 +54,8 @@ function buildHiddenItemRow({ type, id, badgeText, badgeClass, displayText }) {
   return item;
 }
 
-// fetchVideoMetadataFromOEmbed + OEMBED_CONCURRENCY live in shared.js so
-// the popup, options page, and content script all use the same fetcher.
-
-async function backfillMissingHiddenVideoMetadata() {
-  const { videos, metadata } = await getHiddenItemsWithMetadata();
-  const existing = metadata || {};
-  // Skip ids already known to have no oEmbed data (deleted/private/age-gated).
-  // Without this negative cache they'd be re-fetched on every loadHiddenItems().
-  const missing = [...videos].filter(id => id && !existing[id]?.title && !existing[id]?._oembedFailed);
-  if (missing.length === 0) return;
-
-  const fetched = {};
-  const failed = [];
-  for (let i = 0; i < missing.length; i += OEMBED_CONCURRENCY) {
-    const batch = missing.slice(i, i + OEMBED_CONCURRENCY);
-    const results = await Promise.all(batch.map(fetchVideoMetadataFromOEmbed));
-    for (let j = 0; j < batch.length; j++) {
-      if (results[j]) fetched[batch[j]] = results[j];
-      else failed.push(batch[j]);
-    }
-  }
-  if (Object.keys(fetched).length === 0 && failed.length === 0) return;
-
-  await modifyHidden(state => {
-    if (!state.metadata) state.metadata = {};
-    for (const [id, m] of Object.entries(fetched)) {
-      if (!state.metadata[id]?.title) state.metadata[id] = { type: "video", ...m };
-    }
-    // Negative cache: mark definitively-unavailable ids so they aren't retried.
-    // Cleared automatically when the item is unhidden (its metadata is deleted).
-    for (const id of failed) {
-      if (!state.metadata[id]?.title) {
-        state.metadata[id] = { ...(state.metadata[id] || {}), type: "video", title: "", _oembedFailed: true };
-      }
-    }
-  });
-  if (Object.keys(fetched).length > 0) await loadHiddenItems();
-}
+// backfillMissingHiddenVideoMetadata lives in shared.js (one copy shared with
+// options.js; this page passes loadHiddenItems as the onUpdated re-render).
 
 // channelDisplayFromKey lives in shared.js (shared with options.js).
 
@@ -118,15 +82,11 @@ async function loadHiddenItems() {
 
   for (const channelKey of hiddenData.channels) {
     const meta = hiddenData.metadata[channelKey];
-    const fallback = channelDisplayFromKey(channelKey);
-    const displayName = meta?.channelName
-      ? meta.channelName
-      : fallback
-        || (channelKey.startsWith("name:")
-            ? channelKey.slice(5)
-            // Last resort: show the final path segment of a URL-form key rather
-            // than the whole raw https URL (e.g. legacy /c/<name> with no handle).
-            : (channelKey.split("/").filter(Boolean).pop() || "Hidden channel"));
+    // channelDisplayFromKey (shared.js) owns the whole fallback chain —
+    // handle / UC id / name:-key / URL path segment — so popup and options
+    // label the same hidden channel identically.
+    const displayName =
+      meta?.channelName || channelDisplayFromKey(channelKey) || "Hidden channel";
 
     list.appendChild(buildHiddenItemRow({
       type: "channel",
@@ -139,7 +99,7 @@ async function loadHiddenItems() {
 
   // Fire-and-forget backfill of any entries missing metadata. loadHiddenItems
   // is re-invoked once results land.
-  backfillMissingHiddenVideoMetadata().catch(() => {});
+  backfillMissingHiddenVideoMetadata(loadHiddenItems).catch(() => {});
 }
 
 async function unhideItem(type, id) {
