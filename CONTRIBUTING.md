@@ -38,7 +38,9 @@ changes also need a reload of the worker (the same button covers it).
 
 ## Debug tools (inside the extension)
 
-The **Settings → Debug** page is the maintainer's toolkit:
+The **Debug** page is the maintainer's toolkit. Its nav tab is hidden by
+default — open the options page with `#debug` appended to the URL
+(e.g. `chrome-extension://<id>/options.html#debug`) to reveal it.
 
 - **Daily state readout.** Shows the day key, videos watched, time
   watched, and current grace. Auto-refreshes on storage changes.

@@ -1117,6 +1117,20 @@ document.addEventListener("click", event => {
   });
 });
 
+// The Debug tab is a support/power-user surface, not part of the everyday
+// product — its nav button ships hidden and is revealed only when the page
+// is opened (or re-hashed) with #debug in the URL.
+function revealDebugNavIfRequested() {
+  if ((location.hash || "").replace(/^#/, "") !== "debug") return;
+  const btn = document.querySelector('.nav-item[data-page="debug"]');
+  if (btn) btn.style.display = "";
+}
+
+window.addEventListener("hashchange", () => {
+  revealDebugNavIfRequested();
+  activatePage(initialPageFromHash());
+});
+
 (async () => {
   await migrateLegacyStorageKeys();
   // Adopt any active Debug fake-clock BEFORE the time-dependent reads below
@@ -1129,5 +1143,6 @@ document.addEventListener("click", event => {
   await renderDailyStateReadout();
   await renderHiddenItems();
   await applyWatchingLockToAllSections();
+  revealDebugNavIfRequested();
   activatePage(initialPageFromHash());
 })();

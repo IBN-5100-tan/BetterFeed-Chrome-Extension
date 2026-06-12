@@ -909,7 +909,11 @@
         <button class="nav-item" data-page="daily-limit" type="button">Daily limit</button>
         <button class="nav-item" data-page="hidden" type="button">Hidden videos</button>
         <button class="nav-item" data-page="advanced" type="button">Advanced</button>
-        <button class="nav-item" data-page="debug" type="button">Debug</button>
+        <!-- Support/power-user surface: hidden unless the options page is
+             opened with #debug in the URL (options.js reveals it). Inline
+             style (not the hidden attribute) so the .nav-item display rule
+             can't override it. -->
+        <button class="nav-item" data-page="debug" type="button" style="display: none;">Debug</button>
       </nav>
     </aside>
 

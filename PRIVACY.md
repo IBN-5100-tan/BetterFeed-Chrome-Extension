@@ -136,13 +136,16 @@ because there is no such server.
 
 ## How you can clear your data
 
-- **Settings → Debug → Clear local data** wipes everything BetterFeed
-  has stored on this device. (Sync data survives and will rehydrate
-  into local on the next page load.)
-- **Settings → Debug → Clear sync data** wipes the subset that's
-  synced to your Google account. This propagates to every device on
-  your Chrome sync chain. Local data on the device you click from is
-  untouched.
+The Debug page hosts the data-clearing tools. It's a support surface,
+so its tab is hidden by default — open the extension's options page and
+add `#debug` to the end of the URL to reveal it.
+
+- **Debug → Clear local data** wipes everything BetterFeed has stored
+  on this device. (Sync data survives and will rehydrate into local on
+  the next page load.)
+- **Debug → Clear sync data** wipes the subset that's synced to your
+  Google account. This propagates to every device on your Chrome sync
+  chain. Local data on the device you click from is untouched.
 - **Uninstalling the extension** removes everything in
   `chrome.storage.local` for the extension. The `chrome.storage.sync`
   data persists on Google's servers until you also clear it via the
