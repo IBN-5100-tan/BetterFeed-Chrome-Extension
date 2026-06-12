@@ -1,6 +1,6 @@
 # Privacy Policy
 
-_Last updated: 2026-05-25_
+_Last updated: 2026-06-11_
 
 BetterFeed is a Chrome extension that replaces YouTube's algorithmic home
 page with a static weekly grid. This document describes exactly what data
@@ -28,7 +28,13 @@ BetterFeed is installed:
 - **Per-video playback progress.** Position and duration for each
   video in the current week's grid, used to render the progress bar.
 - **Daily watch state.** Today's date key, the list of video IDs you've
-  started today, and the total seconds watched today.
+  started today, and the seconds watched today (tracked per device — see
+  the device identifier below).
+- **Device identifier.** A random ID (e.g. `dev-a1b2c3…`) generated once
+  per install. It exists only so each device's watch-seconds can be kept
+  in its own bucket when the daily state is merged across devices; it is
+  random, local, and not derived from or linked to your identity,
+  hardware, or Google account.
 - **Active grace.** Any "5 more minutes" or "finish this video"
   override you've granted yourself after the daily limit.
 - **Work session state.** The start time and end time (or "no time"
@@ -37,8 +43,10 @@ BetterFeed is installed:
   Debug page; lets you test refresh schedules without waiting.
 
 The extension also writes the active mode (`watch`, `work`, or `listen`)
-to `localStorage` so the extension can apply mode-specific styling
-synchronously at page load.
+and the list of currently-active cleanup-styling classes to the page's
+`localStorage`, so mode- and cleanup-specific styling can be applied
+synchronously at page load (this is what prevents YouTube's native UI
+from flashing before the extension's UI takes over).
 
 ---
 
@@ -59,13 +67,18 @@ syncs across your signed-in browsers:
 - Per-video playback position (just the position number per ID;
   duration is recovered locally).
 - The next-refresh timestamp.
+- Daily watch state — today's date key, the video IDs started today,
+  and the seconds watched today keyed by each device's random
+  identifier. This is synced so the daily limit applies across your
+  devices (watching on a second computer can't bypass it). The device
+  identifier is random and carries no personal information.
 
 Cross-device sync goes through your own Google account. The BetterFeed
 project never sees this data.
 
-Mode, work-session, daily watch state, daily grace, the hidden-item
-title/channel cache, and the debug fake-time offset are **not** synced —
-they stay on the device that wrote them.
+Mode, work-session, daily grace, the hidden-item title/channel cache,
+and the debug fake-time offset are **not** synced — they stay on the
+device that wrote them.
 
 ---
 
