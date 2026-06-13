@@ -810,6 +810,12 @@ function isGraceActiveForLocation(grace, locationLike) {
   return false;
 }
 
+// Day names indexed by Date#getDay(). Shared by the options page (refresh-day
+// pickers) and content.js (cold-start pickers, long date formatting).
+const DAY_NAMES_LONG = [
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+];
+
 function convertTo12Hour(hour24) {
   const hour = Number(hour24);
   if (hour === 0) return { hour: 12, ampm: "am" };
@@ -963,7 +969,8 @@ async function persistHiddenState(state) {
   );
   // Drop any legacy metadata blob left over in sync from older builds —
   // we now rebuild via the oEmbed backfill instead of carrying it through.
-  safeSyncRemove([STORAGE_HIDDEN_METADATA_KEY]).catch(() => {});
+  // (safeSyncRemove catches internally and never rejects.)
+  safeSyncRemove([STORAGE_HIDDEN_METADATA_KEY]);
 }
 
 // Builds a serial queue: each enqueued fn runs only after the previous one
@@ -1280,8 +1287,12 @@ async function saveWeeklyVideosToStorage(videos, refreshAfter) {
   // so flush them. Routed through modifyWatched so it serializes against any
   // in-flight user-driven watched write and also clears the synced copy.
   await modifyWatched(set => set.clear());
-  // Same goes for per-video playback progress.
+  // Same goes for per-video playback progress — including the synced copy.
+  // Hydration merges sync progress back into local (max-position, no delete
+  // signal), so a stale prior-week map left in sync would creep back into
+  // local until a watch-tab flush happened to prune it.
   await chrome.storage.local.remove(STORAGE_PROGRESS_KEY);
+  await safeSyncRemove([STORAGE_PROGRESS_KEY]);
 }
 
 async function hydrateFromSync() {

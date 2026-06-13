@@ -10,10 +10,6 @@
 // reading location.hash (marker pages) or localStorage (everywhere else).
 // =============================================================================
 
-// early.js runs at document_start. preload.css (loaded at the same time
-// via manifest content_scripts) carries all the CSS — this file's job is
-// just to set the right classes on documentElement before any DOM parses.
-
 // Marker hash list mirrored from shared.js. Hardcoded because early.js
 // runs in its own content_scripts entry and can't import shared.js.
 const MARKER_HASHES_EARLY = [
@@ -60,15 +56,35 @@ if (earlyMode === "work" || earlyMode === "listen") {
 // content.js applyFeatureSettings). features.css is loaded at document_start
 // too, so applying the classes here hides the watch-page recommendations /
 // comments / Shorts before first paint instead of flashing them in; content.js
-// reconciles the exact set once it has read settings. The name guard stops a
-// tampered value from injecting arbitrary classes.
+// reconciles the exact set once it has read settings.
+//
+// Exact-match allowlist, mirrored from FEATURE_CLASS_SETTINGS in content.js —
+// update both when adding a cleanup toggle. A bare "better-feed-" prefix check
+// would also admit state classes from a tampered value (e.g.
+// better-feed-pre-ready, which hides the whole app shell until content.js's
+// watchdog clears it), so each class is matched exactly.
+const FEATURE_CLASSES_EARLY = [
+  "better-feed-hide-shorts",
+  "better-feed-hide-watch-recs",
+  "better-feed-disable-autoplay",
+  "better-feed-hide-end-screen-cards",
+  "better-feed-hide-live-chat",
+  "better-feed-hide-watch-side-panel",
+  "better-feed-hide-comments",
+  "better-feed-hide-notification-bell",
+  "better-feed-hide-explore-trending",
+  "better-feed-hide-more-from-youtube",
+  "better-feed-hide-mix-radio-playlists",
+  "better-feed-hide-voice-search",
+  "better-feed-hide-create-button"
+];
 try {
   const rawFeatureClasses = localStorage.getItem("betterFeedFeatureClasses");
   if (rawFeatureClasses) {
     const featureClasses = JSON.parse(rawFeatureClasses);
     if (Array.isArray(featureClasses)) {
       for (const c of featureClasses) {
-        if (typeof c === "string" && c.indexOf("better-feed-") === 0) {
+        if (typeof c === "string" && FEATURE_CLASSES_EARLY.indexOf(c) !== -1) {
           document.documentElement.classList.add(c);
         }
       }

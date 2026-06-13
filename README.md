@@ -178,8 +178,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full data flow.
 
 ```
 manifest.json    Chrome MV3 manifest. Lists permissions, content scripts,
-                 the service worker, the popup, the options page, and the
-                 web-accessible welcome page.
+                 the service worker, the popup, and the options page.
 
 background.js    Service worker. Owns the dNR redirect rule and the
                  5-minute refresh-check alarm.

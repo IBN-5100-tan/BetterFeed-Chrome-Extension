@@ -146,6 +146,13 @@ applies a small set of `<html>` classes:
   treats Listen and Work as equivalent via `isWorkLikeMode`). This lets
   preload.css hide the sidebar / home grid / etc. before YouTube paints
   them, including on non-marker pages like `/watch`.
+- The last-known cleanup classes (`better-feed-hide-shorts`, …), replayed
+  from the `betterFeedFeatureClasses` localStorage mirror that
+  `applyFeatureSettings()` writes — so features.css can hide Shorts /
+  comments / watch-recs before first paint instead of flashing them in.
+  Gated by `FEATURE_CLASSES_EARLY`, an exact-match allowlist mirroring
+  content.js's `FEATURE_CLASS_SETTINGS` (update both when adding a
+  cleanup toggle); content.js reconciles the real set once settings load.
 
 The CSS rules in `preload.css` are intentionally `!important` and use
 `html.<class>` ancestor selectors — they have to outrank YouTube's own
@@ -195,7 +202,7 @@ Key responsibilities:
 
 ### `content.js`
 
-The behavior file. ~3800 lines, organized into the labeled sections you'll
+The behavior file. ~4700 lines, organized into the labeled sections you'll
 see if you grep for `/* ---------- ... ---------- */`. The top-of-file
 header lists every section and what it owns.
 
@@ -219,9 +226,11 @@ completion, all roads lead to `update()`, which calls
 5. If the daily limit is hit and no grace is active, render
    `renderSeeYouTomorrow()`.
 6. Otherwise, `renderFromStorage()` reads the stored grid + the background's
-   refresh status and paints the grid, the "Refreshing…" loader, or a quiet
-   retry message — a pure read, no fetching/saving (see the refresh pipeline
-   below).
+   refresh status and paints the grid, the "Refreshing…" loader, a quiet
+   retry message, or — when the saved set exists but can't render (every
+   video hidden, or every video flagged live) — an honest terminal message
+   instead of a spinner that would never resolve. A pure read, no
+   fetching/saving (see the refresh pipeline below).
 
 `onNonHomePage()` runs on `/watch`, `/results`, channel pages, etc. It
 doesn't replace anything — it just removes our injected style/grid (if

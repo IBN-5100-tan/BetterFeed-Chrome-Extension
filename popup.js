@@ -166,6 +166,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   // rejection in the popup (matches the .catch() on the backfill call).
   try {
     await migrateLegacyStorageKeys();
+    // Adopt any active Debug fake-clock BEFORE hydrating — hydrateFromSync's
+    // daily-state merge resolves "today" via getNow(), and every other context
+    // loads the offset at init. Without this, a popup opened during fake-time
+    // testing merges daily state against the real clock.
+    await loadFakeNowOffset();
     await hydrateFromSync();
   } catch (_) {}
 })();

@@ -25,7 +25,7 @@
 
 // showStatus lives in shared.js (shared with popup.js).
 
-const DAY_NAMES_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+// DAY_NAMES_LONG lives in shared.js (also used by content.js).
 const DAY_NAMES_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const ORDINALS = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th"];
 
@@ -601,7 +601,7 @@ async function renderDailyStateReadout() {
   }
   if (grace) {
     if (grace.type === "minutes") {
-      const remaining = Math.max(0, Math.round((grace.expiresAt - Date.now()) / 1000));
+      const remaining = Math.max(0, Math.round((grace.expiresAt - getNow()) / 1000));
       lines.push(`Grace:            minutes (${remaining}s remaining)`);
     } else if (grace.type === "finish") {
       lines.push(`Grace:            finish video (${grace.videoId})`);

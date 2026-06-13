@@ -44,8 +44,9 @@ default — open the options page with `#debug` appended to the URL
 
 - **Daily state readout.** Shows the day key, videos watched, time
   watched, and current grace. Auto-refreshes on storage changes.
-- **Manual refresh.** Forces the background to fetch a fresh grid on the
-  next refresh check.
+- **Manual refresh.** Clears the saved grid and immediately nudges the
+  background to fetch a fresh one (the nudge carries `force: true`, which
+  bypasses the transient-error cooldown).
 - **Force-add video.** Paste an 11-char video ID or any of: `youtu.be/ID`,
   `youtube.com/watch?v=ID`, `youtube.com/shorts/ID`, `youtube.com/embed/ID`.
   The extension prepends a stub to the weekly grid and `rebuildVideoMetadataIfNeeded()`
@@ -103,7 +104,7 @@ background.js    Service worker (dNR redirect rule, refresh-due alarm).
 early.js         Runs at document_start, applies <html> classes.
 preload.css      Hides native YouTube shell before paint.
 shared.js        Storage / settings / sync / getNow(). Loaded by everything.
-content.js       Everything users see on a YouTube tab. ~3800 lines.
+content.js       Everything users see on a YouTube tab. ~4700 lines.
 options.html/js  Full-tab settings page.
 popup.html/js    Toolbar popup.
 welcome.html/js  Post-install hero page.
@@ -131,6 +132,10 @@ between sections.
      feature toggles map to a `BODY_CLASS_*` constant toggled on `<html>` by
      `applyFeatureSettings()`, plus a CSS rule in features.css gated on that
      class).
+  5. For cleanup toggles, also add the class to `FEATURE_CLASSES_EARLY` in
+     `early.js` — the exact-match allowlist that replays the class at
+     `document_start`. Miss this and the hidden element flashes in on every
+     page load before content.js reconciles the settings.
 
 ---
 
@@ -168,12 +173,14 @@ the surface:
 ### The `key` field in manifest.json
 
 The `key` field in `manifest.json` pins the extension ID. **Do not change
-or remove it.** It's what makes unpacked development installs share the
-same ID as the Web Store version, so:
+or remove it in the repo.** It's what makes unpacked development installs
+share the same ID as the Web Store version, so sync data stays attached
+when you swap between dev and store builds.
 
-- Sync data stays attached when you swap between dev and store builds.
-- The Web Store accepts a fresh upload as an update to the existing
-  listing rather than rejecting it as a different extension.
+Uploads to the Web Store must **not** contain the field — the CWS rejects
+packages whose manifest carries one (the store assigns the published ID
+itself). `build-release.ps1` strips it from the *staged* manifest when
+packaging; the repo copy is untouched.
 
 The Web Store signs uploads server-side, so there is no local `.pem`
 signing key to safeguard. If you ever need to self-distribute a `.crx`
@@ -185,14 +192,18 @@ guard in case anyone ever does generate one locally.
 ### Packaging
 
 1. Bump `version` in `manifest.json`.
-2. Zip the extension:
+2. Build the Web Store zip with the release script. It stages only the
+   runtime files (plus LICENSE), strips the `key` field from the staged
+   manifest, and writes `dist\betterfeed-<version>.zip`:
 
-   ```sh
-   zip -r betterfeed.zip . \
-     -x "*.pem" "*.git*" ".claude/*" "*.DS_Store" "*.zip" "*.crx" "*.md" "*.code-workspace"
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\build-release.ps1
    ```
 
-3. Upload `betterfeed.zip` to the Chrome Web Store developer dashboard.
+   (On macOS / Linux, `pwsh -File ./build-release.ps1` with PowerShell
+   Core does the same.)
+
+3. Upload the zip to the Chrome Web Store developer dashboard.
 4. Submit for review.
 
 ---

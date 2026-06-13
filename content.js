@@ -23,7 +23,9 @@
 //                          driven by background.js's HTTP-fetch refresh.)
 //   - WEEKLY GRID RENDER : renderFromStorage — pure read of the stored grid +
 //                          background-owned refresh status; paints the grid,
-//                          the "Refreshing…" loader, or a quiet retry message.
+//                          the "Refreshing…" loader, a quiet retry message,
+//                          or an honest terminal message (all-hidden /
+//                          all-live saved set).
 //                          content.js no longer fetches/scrapes/saves — the
 //                          background owns the entire refresh (see background.js
 //                          ensureFreshVideos).
@@ -128,6 +130,8 @@ function ensureThemeObserver() {
 
 // [body class, settings flag] for each cleanup toggle. Driven as a table so
 // applyFeatureSettings stays a single loop instead of 13 repeated lines.
+// Mirrored by FEATURE_CLASSES_EARLY in early.js (the exact-match allowlist
+// for the localStorage replay) — update both when adding a toggle.
 const FEATURE_CLASS_SETTINGS = [
   [BODY_CLASS_HIDE_SHORTS, "hideShorts"],
   [BODY_CLASS_HIDE_WATCH_RECS, "hideWatchRecs"],
@@ -832,9 +836,7 @@ const MONTH_NAMES_LONG = [
   "July", "August", "September", "October", "November", "December"
 ];
 
-const DAY_NAMES_LONG = [
-  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
-];
+// DAY_NAMES_LONG lives in shared.js (also used by the options page).
 
 function ordinalSuffix(n) {
   const v = n % 100;
@@ -1537,7 +1539,8 @@ function trimNumber(value) {
 // The background owns the entire refresh (fetch youtube.com -> parse
 // ytInitialData -> filter/pick -> save) and writes STORAGE_REFRESH_STATUS_KEY.
 // This function only READS storage and paints: the grid, the "Refreshing…"
-// loader, or a quiet retry message. It re-runs reactively via the
+// loader, a quiet retry message, or an honest terminal message when the
+// saved set can't render (all-hidden / all-live). It re-runs reactively via the
 // storage.onChanged listener whenever the background saves videos or flips
 // the status. It never returns null, never navigates, never writes the grid.
 
@@ -1558,6 +1561,10 @@ async function renderFromStorage() {
     await renderCustomHome(visible);
     return;
   }
+
+  const status = statusData[STORAGE_REFRESH_STATUS_KEY];
+  const state = status && status.state;
+
   // The weekly set exists but the user hid all of it — show an honest terminal
   // message, NOT the "Refreshing" spinner. The background won't re-scrape to
   // backfill hidden videos (fixed-set design), so the spinner would never
@@ -1567,12 +1574,26 @@ async function renderFromStorage() {
     return;
   }
 
+  // Videos ARE saved, but live-filtering emptied the pool — every entry
+  // (including the over-scrape reserve) got flagged live after save. Unless a
+  // refresh is actually in flight, the spinner below would never resolve (the
+  // nudge no-ops while refreshAfter is in the future), so show an honest
+  // terminal message like the all-hidden case. The nudge still fires once:
+  // if a refresh IS due it fetches a fresh pool; if not, the background's
+  // due-check makes it a no-op.
+  if (Array.isArray(stored.videos) && stored.videos.length > 0 && state !== "refreshing") {
+    renderLoadingMessage("All of this week's videos turned out to be live streams or premieres, which your settings exclude. New videos arrive at the next refresh.");
+    if (!requestedEnsureFreshThisLoad) {
+      requestedEnsureFreshThisLoad = true;
+      chrome.runtime.sendMessage({ type: "better-feed-ensure-fresh" }).catch(() => {});
+    }
+    return;
+  }
+
   // No videos saved yet (cold / refreshing). Pick the loader vs. a quiet retry
   // message from the background-owned refresh status. We never show a terminal
   // "reload to try again" error — the background retries on its alarm and the
   // storage onChanged re-renders us when videos land.
-  const status = statusData[STORAGE_REFRESH_STATUS_KEY];
-  const state = status && status.state;
   if (state === "error") {
     renderLoadingMessage("Couldn't load this week's videos — retrying shortly.");
   } else {
@@ -1744,6 +1765,11 @@ function stopWatchLiveChatPresence() {
 }
 
 function onNonHomePage() {
+  // Invalidate any in-flight renderCustomHome (same pattern as
+  // renderLoadingMessage): without the bump, a grid render parked on its
+  // storage reads when the user navigated away would resume, pass its token
+  // check, and re-inject the grid into the now-hidden browse element.
+  ++renderToken;
   removeCustomHome();
   markModeReady();
   // Only watch pages can have live chat; elsewhere clear any stale state.
@@ -2243,12 +2269,12 @@ function renderColdStartRefreshCustom() {
   timeRow.className = "better-feed-setup-time-row";
 
   const hourSelect = document.createElement("select");
-  const startHour = draft.refreshHour % 12 === 0 ? 12 : draft.refreshHour % 12;
+  const draftTime12 = convertTo12Hour(draft.refreshHour);
   for (let h = 1; h <= 12; h++) {
     const opt = document.createElement("option");
     opt.value = String(h);
     opt.textContent = String(h);
-    if (h === startHour) opt.selected = true;
+    if (h === draftTime12.hour) opt.selected = true;
     hourSelect.appendChild(opt);
   }
 
@@ -2257,16 +2283,12 @@ function renderColdStartRefreshCustom() {
     const opt = document.createElement("option");
     opt.value = v;
     opt.textContent = v.toUpperCase();
-    if ((draft.refreshHour < 12 ? "am" : "pm") === v) opt.selected = true;
+    if (draftTime12.ampm === v) opt.selected = true;
     ampmSelect.appendChild(opt);
   }
 
   const updateHour = () => {
-    const h12 = Number(hourSelect.value);
-    const ampm = ampmSelect.value;
-    let h24 = h12 % 12;
-    if (ampm === "pm") h24 += 12;
-    draft.refreshHour = h24;
+    draft.refreshHour = convertTo24Hour(hourSelect.value, ampmSelect.value);
   };
   hourSelect.addEventListener("change", updateHour);
   ampmSelect.addEventListener("change", updateHour);
@@ -3708,10 +3730,8 @@ async function onModePicked(mode) {
 }
 
 function formatResetTime(settings) {
-  const hour = settings.refreshHour;
-  const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-  const ampm = hour < 12 ? "AM" : "PM";
-  return `${h12}:00 ${ampm}`;
+  const { hour, ampm } = convertTo12Hour(settings.refreshHour);
+  return `${hour}:00 ${ampm.toUpperCase()}`;
 }
 
 function renderSeeYouTomorrow(settings) {
@@ -4610,8 +4630,13 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
     // "Clear local data" wiped the authoritative chrome.storage mode, but the
     // localStorage mode mirror (origin-scoped to this YouTube tab) survives a
     // clear initiated from the options page and would otherwise feed early.js
-    // a stale mode on the next load. Zero it here.
-    try { localStorage.removeItem(MODE_LOCALSTORAGE_KEY); } catch (_) {}
+    // a stale mode on the next load. Zero it here — but only on a FULL wipe
+    // (both keys cleared in one event). A videos-only clear (Debug "Refresh
+    // weekly videos now") leaves the mode active, and dropping the mirror then
+    // would cost the next page load its anti-flash mode classes.
+    if (settingsCleared && videosCleared) {
+      try { localStorage.removeItem(MODE_LOCALSTORAGE_KEY); } catch (_) {}
+    }
     await maybeReEnterColdStart();
   }
 

@@ -16,9 +16,10 @@ $distDir = Join-Path $repo "dist"
 if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
-# Everything the extension actually loads at runtime.
+# Everything the extension actually loads at runtime, plus the GPL license
+# text (distributed copies should carry it).
 $files = @(
-  "manifest.json",
+  "manifest.json", "LICENSE",
   "background.js", "shared.js", "content.js", "early.js", "welcome.js",
   "options.js", "popup.js",
   "options.html", "popup.html", "welcome.html",
