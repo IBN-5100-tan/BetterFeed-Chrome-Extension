@@ -39,7 +39,7 @@ changes also need a reload of the worker (the same button covers it).
 ## Debug tools (inside the extension)
 
 The **Debug** page is the maintainer's toolkit. Its nav tab is hidden by
-default — open the options page with `#debug` appended to the URL
+default - open the options page with `#debug` appended to the URL
 (e.g. `chrome-extension://<id>/options.html#debug`) to reveal it.
 
 - **Daily state readout.** Shows the day key, videos watched, time
@@ -59,11 +59,11 @@ default — open the options page with `#debug` appended to the URL
   without waiting a day. Apply, reload YouTube, observe the grid refresh;
   clear to return to real time.
 - **Storage.**
-  - *Reset daily limit* — clears `STORAGE_DAILY_STATE_KEY` +
+  - *Reset daily limit* - clears `STORAGE_DAILY_STATE_KEY` +
     `STORAGE_DAILY_GRACE_KEY`.
-  - *Clear local data* — `chrome.storage.local.clear()`. Sync survives
+  - *Clear local data* - `chrome.storage.local.clear()`. Sync survives
     and rehydrates back into local on the next page load.
-  - *Clear sync data* — `chrome.storage.sync.clear()`. Propagates to
+  - *Clear sync data* - `chrome.storage.sync.clear()`. Propagates to
     every device on your sync chain. Local on this device is untouched.
 
 ### Useful console snippets
@@ -133,7 +133,7 @@ between sections.
      `applyFeatureSettings()`, plus a CSS rule in features.css gated on that
      class).
   5. For cleanup toggles, also add the class to `FEATURE_CLASSES_EARLY` in
-     `early.js` — the exact-match allowlist that replays the class at
+     `early.js` - the exact-match allowlist that replays the class at
      `document_start`. Miss this and the hidden element flashes in on every
      page load before content.js reconciles the settings.
 
@@ -141,7 +141,7 @@ between sections.
 
 ## Testing changes
 
-There's no automated test suite — UI surface area is large, and most bugs
+There's no automated test suite - UI surface area is large, and most bugs
 show up only against the real YouTube DOM. Manual flows that cover most of
 the surface:
 
@@ -152,7 +152,7 @@ the surface:
 3. **Mode picker.** Open a fresh YouTube tab, confirm the picker appears;
    pick each mode and confirm the UI matches.
 4. **Work session.** Start a 20-minute session, attempt to switch back to
-   Watch — confirm the unlock challenge appears. Wait out the timer
+   Watch - confirm the unlock challenge appears. Wait out the timer
    (use fake time), confirm the session-ended popup appears.
 5. **Daily limit.** Set the limit to 1 video / 1 minute. Watch one,
    confirm the see-you-tomorrow takeover, try both grace flows.
@@ -177,7 +177,7 @@ or remove it in the repo.** It's what makes unpacked development installs
 share the same ID as the Web Store version, so sync data stays attached
 when you swap between dev and store builds.
 
-Uploads to the Web Store must **not** contain the field — the CWS rejects
+Uploads to the Web Store must **not** contain the field - the CWS rejects
 packages whose manifest carries one (the store assigns the published ID
 itself). `build-release.ps1` strips it from the *staged* manifest when
 packaging; the repo copy is untouched.
@@ -217,17 +217,19 @@ guard in case anyone ever does generate one locally.
 The `id` under `browser_specific_settings.gecko` in `manifest.json` is to
 Firefox what the `key` field is to Chrome: it pins the extension's
 identity across builds so sync data follows the user. **Do not change
-it after the first AMO submission** — Mozilla treats a changed `id` as
+it after the first AMO submission** - Mozilla treats a changed `id` as
 a different extension and you'd lose the listing and every user's
 synced data.
 
-The current value is a placeholder tied to the GitHub project; pick a
-final value before the first submission if you want it to look more
-official.
+The value (`betterfeed@ibn-5100-tan.github.io`) is committed and was used
+for the AMO submission, so it is now permanent. **Never change it.** It's
+an opaque identifier, not a real address; nothing emails it and users don't
+see it. Its Chrome counterpart, the `key` field, likewise determines the
+public extension ID in the store URL, so neither field should ever change.
 
 ### Packaging
 
-The same zip that ships to the Chrome Web Store works for AMO — Firefox
+The same zip that ships to the Chrome Web Store works for AMO - Firefox
 121+ accepts the MV3 manifest with `service_worker` background.
 
 1. Bump `version` in `manifest.json`. AMO requires the version to be
@@ -245,13 +247,13 @@ Mozilla. You cannot side-load an unsigned `.xpi`. For development,
 `about:debugging` → "Load Temporary Add-on" works without signing but
 the add-on is unloaded on browser restart. For permanent self-hosted
 installs (no AMO listing) you still upload to AMO, just with the
-"On your own" distribution option — Mozilla signs the file and returns
+"On your own" distribution option - Mozilla signs the file and returns
 it for you to distribute.
 
 ### Cross-browser sync is separate
 
 `chrome.storage.sync` writes to whichever sync infrastructure the user's
-browser uses — Chrome Sync for Chrome, Firefox Sync for Firefox. A user
+browser uses - Chrome Sync for Chrome, Firefox Sync for Firefox. A user
 who installs BetterFeed in both browsers will have **two independent
 sync chains**. This is a platform limitation, not something the
 extension can bridge. Mention it on the AMO listing description so users
@@ -272,9 +274,9 @@ Useful info to include:
   service worker / options page).
 
 For YouTube-redesign bugs, there are two failure modes. (1) Something
-stopped hiding (Shorts, comments, etc.) — a CSS/selector change; include a
+stopped hiding (Shorts, comments, etc.) - a CSS/selector change; include a
 screenshot with DevTools open to the broken element so the fix is a selector
-update. (2) The refresh returns zero videos — YouTube changed the
+update. (2) The refresh returns zero videos - YouTube changed the
 `ytInitialData` JSON shape; the fix is in `parseLockupViewModel` /
 `extractVideosFromYouTubeHomeHtml` in `shared.js`. Include the output of
 `await chrome.storage.local.get("betterFeedRefreshStatus")` and, if you can,

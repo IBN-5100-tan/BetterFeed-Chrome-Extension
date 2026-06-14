@@ -1,5 +1,5 @@
 // =============================================================================
-// popup.js — toolbar popup (opens from the BetterFeed extension icon).
+// popup.js - toolbar popup (opens from the BetterFeed extension icon).
 //
 // Two top-level buttons:
 //   - Settings   : opens the full options page in a new tab.
@@ -82,8 +82,8 @@ async function loadHiddenItems() {
 
   for (const channelKey of hiddenData.channels) {
     const meta = hiddenData.metadata[channelKey];
-    // channelDisplayFromKey (shared.js) owns the whole fallback chain —
-    // handle / UC id / name:-key / URL path segment — so popup and options
+    // channelDisplayFromKey (shared.js) owns the whole fallback chain -
+    // handle / UC id / name:-key / URL path segment - so popup and options
     // label the same hidden channel identically.
     const displayName =
       meta?.channelName || channelDisplayFromKey(channelKey) || "Hidden channel";
@@ -149,7 +149,7 @@ document.addEventListener("click", async event => {
 });
 
 // Re-render the Hidden Items list if a sync hydrate (or any other context)
-// changes the hidden keys while the popup is open and showing that view —
+// changes the hidden keys while the popup is open and showing that view -
 // otherwise a mid-open sync merge leaves a stale list until the user re-clicks.
 // (Only the hide/unhide keys; the metadata backfill re-renders itself.)
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -166,7 +166,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   // rejection in the popup (matches the .catch() on the backfill call).
   try {
     await migrateLegacyStorageKeys();
-    // Adopt any active Debug fake-clock BEFORE hydrating — hydrateFromSync's
+    // Adopt any active Debug fake-clock BEFORE hydrating - hydrateFromSync's
     // daily-state merge resolves "today" via getNow(), and every other context
     // loads the offset at init. Without this, a popup opened during fake-time
     // testing merges daily state against the real clock.

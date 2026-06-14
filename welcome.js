@@ -1,5 +1,5 @@
 // =============================================================================
-// welcome.js — wiring for the post-install welcome.html tab.
+// welcome.js - wiring for the post-install welcome.html tab.
 //
 // Two buttons:
 //   - Open settings    : opens the full options page.

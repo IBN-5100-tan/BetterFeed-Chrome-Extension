@@ -1,5 +1,5 @@
 // =============================================================================
-// options.js — full-tab options page logic.
+// options.js - full-tab options page logic.
 //
 // The page is divided into nav pages: Refresh, Cleanup, Daily limit, Hidden
 // videos, Advanced, Debug. Each page is a <section class="page"> in
@@ -17,7 +17,7 @@
 //     duration input.
 //   - Hidden-items list (videos + channels) with oEmbed metadata backfill.
 //   - Watching lock: once the user starts watching today, the Refresh and
-//     Daily-limit sections lock behind a typed numeric code — same friction
+//     Daily-limit sections lock behind a typed numeric code - same friction
 //     pattern as the Work-mode unlock challenge in content.js.
 //   - Debug: daily-state readout, manual refresh, force-add video, fake-time
 //     offset, storage clear buttons.
@@ -116,7 +116,7 @@ function readHourMinutePair() {
   let h = Math.max(0, Number(document.getElementById("max-hours-per-day").value) || 0);
   // Normalize minutes overflow into the hours field instead of clamping it
   // away: a typed "90" minutes (HTML max=59 caps the spinner, not typed or
-  // pasted values) means 1h30m — silently saving 59m would shrink the limit
+  // pasted values) means 1h30m - silently saving 59m would shrink the limit
   // the user actually asked for.
   let m = Math.max(0, Number(document.getElementById("max-minutes-per-day").value) || 0);
   h += Math.floor(m / 60);
@@ -285,7 +285,7 @@ async function autoSave() {
   // local set(), and that set() fires storage.onChanged during the await.
   // Stamping after (old behavior) let the onChanged echo-guard read a stale
   // timestamp, so the tab treated its own write as a remote change and reloaded
-  // the form mid-edit — guaranteed on the first edit, when the ts was still 0.
+  // the form mid-edit - guaranteed on the first edit, when the ts was still 0.
   // Spread the CURRENT stored settings under the form fields: saveSettings
   // sanitizes the object it's given with no merge, so any field this form
   // doesn't own (workCustomMinutes, persisted by content.js when the user
@@ -345,7 +345,7 @@ function computeMaxSecondsPerDayFromInputs() {
   const totalSeconds = (h * 60 + m) * 60;
   // Clamp to [60, 86400]. Floor at 60 (1 min) so an empty/zero state still has a
   // sane limit; cap at 24h (86400s) because sanitizeSettings REJECTS anything
-  // larger and falls back to the 1h default — so e.g. "24h 30m" would otherwise
+  // larger and falls back to the 1h default - so e.g. "24h 30m" would otherwise
   // silently reset to 1 hour instead of capping at 24h.
   return Math.min(86400, Math.max(60, totalSeconds));
 }
@@ -433,7 +433,7 @@ async function refreshFakeNowUI() {
   const input = document.getElementById("fake-now-input");
 
   if (offset === 0) {
-    status.textContent = `Real time — no offset applied.\nCurrent: ${formatHumanDateTime(Date.now())}`;
+    status.textContent = `Real time - no offset applied.\nCurrent: ${formatHumanDateTime(Date.now())}`;
     if (!input.value) input.value = formatLocalDateTimeInput(Date.now());
   } else {
     const fakeNow = Date.now() + offset;
@@ -464,14 +464,14 @@ document.getElementById("fake-now-apply-btn").addEventListener("click", async ()
   const offset = sanitizeFakeNowOffset(target - Date.now());
   await chrome.storage.local.set({ [STORAGE_FAKE_NOW_OFFSET_KEY]: offset });
   await refreshFakeNowUI();
-  showStatus(`Fake time set — refresh logic will treat now as ${formatHumanDateTime(target)}`);
+  showStatus(`Fake time set - refresh logic will treat now as ${formatHumanDateTime(target)}`);
 });
 
 document.getElementById("fake-now-clear-btn").addEventListener("click", async () => {
   await chrome.storage.local.remove([STORAGE_FAKE_NOW_OFFSET_KEY]);
   document.getElementById("fake-now-input").value = formatLocalDateTimeInput(Date.now());
   await refreshFakeNowUI();
-  showStatus("Cleared — using real time");
+  showStatus("Cleared - using real time");
 });
 
 // Only poll while the Debug page is actually visible. The fake-now status only
@@ -490,7 +490,7 @@ document.getElementById("refresh-weekly-btn").addEventListener("click", async ()
   // saveWeeklyVideosToStorage([],0) also clears the SYNCED watched set and drops
   // local progress, which would surface this week's videos as unwatched on every
   // device. Instead just clear the grid + refresh marker so isRefreshDue() is
-  // true, then nudge the background — watched flags + progress survive. (An empty
+  // true, then nudge the background - watched flags + progress survive. (An empty
   // VIDEOS list is length-0-guarded in hydrate, so it won't clobber peers.)
   await chrome.storage.local.set({ [STORAGE_VIDEOS_KEY]: [], [STORAGE_REFRESH_AFTER_KEY]: 0 });
   // Drop the sync-side copies too: hydrateFromSync restores sync videos when
@@ -500,10 +500,10 @@ document.getElementById("refresh-weekly-btn").addEventListener("click", async ()
   // and cancel this forced refresh.
   await safeSyncRemove([STORAGE_VIDEOS_KEY, STORAGE_REFRESH_AFTER_KEY]);
   // force: a user-initiated refresh bypasses the background's transient-error
-  // cooldown — the grid was just cleared, so a swallowed nudge would leave it
+  // cooldown - the grid was just cleared, so a swallowed nudge would leave it
   // empty until the next 5-minute alarm.
   try { await chrome.runtime.sendMessage({ type: "better-feed-ensure-fresh", force: true }); } catch (_) {}
-  showStatus("Refreshing — reload YouTube tab if grid doesn't update");
+  showStatus("Refreshing - reload YouTube tab if grid doesn't update");
   setTimeout(() => { btn.disabled = false; }, 800);
 });
 
@@ -552,7 +552,7 @@ document.getElementById("force-add-video-btn").addEventListener("click", async (
       return;
     }
 
-    // Write a pure stub (shared.js stubVideoFromId — same shape sync hydration
+    // Write a pure stub (shared.js stubVideoFromId - same shape sync hydration
     // uses). The content script's rebuildVideoMetadataIfNeeded runs
     // automatically on the storage change and fetches everything from real
     // YouTube data: oEmbed for title/channel, the watch page for view count +
@@ -567,7 +567,7 @@ document.getElementById("force-add-video-btn").addEventListener("click", async (
     });
 
     input.value = "";
-    showStatus(`Added ${videoId} at the top of the grid. Open or reload a YouTube tab on the weekly home — metadata fills in within a few seconds.`);
+    showStatus(`Added ${videoId} at the top of the grid. Open or reload a YouTube tab on the weekly home - metadata fills in within a few seconds.`);
   } finally {
     setTimeout(() => { btn.disabled = false; }, 600);
   }
@@ -585,8 +585,8 @@ async function renderDailyStateReadout() {
   // cap only when mode !== "time" and the seconds cap only when mode !== "videos".
   const dlMode = settings.dailyLimitMode;
   const dlOff = !settings.dailyLimitEnabled;
-  const videosNote = dlOff ? "  (limit disabled)" : dlMode === "time" ? "  (not enforced — time-only mode)" : "";
-  const timeNote = dlOff ? "  (limit disabled)" : dlMode === "videos" ? "  (not enforced — videos-only mode)" : "";
+  const videosNote = dlOff ? "  (limit disabled)" : dlMode === "time" ? "  (not enforced - time-only mode)" : "";
+  const timeNote = dlOff ? "  (limit disabled)" : dlMode === "videos" ? "  (not enforced - videos-only mode)" : "";
 
   const lines = [];
   lines.push(`Day key:          ${state.dayKey}`);
@@ -617,7 +617,7 @@ document.getElementById("reset-daily-btn").addEventListener("click", async () =>
   const btn = document.getElementById("reset-daily-btn");
   btn.disabled = true;
   await chrome.storage.local.remove([STORAGE_DAILY_STATE_KEY, STORAGE_DAILY_GRACE_KEY]);
-  // Daily state is synced (CRDT), so also clear the synced copy — otherwise the
+  // Daily state is synced (CRDT), so also clear the synced copy - otherwise the
   // next sync event re-merges today's progress straight back. (Grace is
   // local-only.) This empties this device's shared bucket; a still-online peer
   // holding today's buckets could re-push, but for a single user it sticks.
@@ -825,7 +825,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   // Track the Debug fake-clock like content.js/background.js do. Without
   // this, every time-dependent readout on this page (day key via getNow,
   // grace remaining, the watching lock) runs on the REAL clock while the
-  // YouTube tabs run on the fake one — the readout shows empty state and
+  // YouTube tabs run on the fake one - the readout shows empty state and
   // the watching-locked sections unlock during an active fake-day binge.
   applyFakeNowOffsetChange(changes);
   if (STORAGE_FAKE_NOW_OFFSET_KEY in changes) {
@@ -836,13 +836,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderDailyStateReadout();
   }
   // A settings change that isn't this tab's own write echo means another
-  // device (via sync) or another tab updated settings — reload the form so a
+  // device (via sync) or another tab updated settings - reload the form so a
   // later autoSave doesn't push stale field values back over the remote change.
   if (SETTINGS_KEY in changes && Date.now() - lastLocalSettingsWriteTs > 1500) {
     loadSettings();
   }
   if (STORAGE_DAILY_STATE_KEY in changes) {
-    // Watching started/cleared in another tab — re-evaluate lock state.
+    // Watching started/cleared in another tab - re-evaluate lock state.
     applyWatchingLockToAllSections();
   }
   if (
@@ -860,7 +860,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // route through saveSettings() so the change persists locally, syncs
 // across devices, and runs through the same sanitizer as autoSave.
 //
-// The watching lock guards both flavors — if any [data-lockable="watching"]
+// The watching lock guards both flavors - if any [data-lockable="watching"]
 // section is currently locked, reset is refused until the user types the
 // unlock code. Otherwise the reset button would be a trivial bypass for
 // the lock's "no editing limits mid-binge" intent.
@@ -965,9 +965,9 @@ document.addEventListener("click", event => {
 
 /* ---------- WATCHING LOCK ---------- */
 // Once the user has started watching today, the refresh schedule and daily
-// watch limit sections lock — preventing the impulsive "let me just bump the
+// watch limit sections lock - preventing the impulsive "let me just bump the
 // limit to keep watching" loophole. Mirrors the work-mode unlock challenge:
-// type a fresh 16–20 digit code to release the lock for this options-tab
+// type a fresh 16-20 digit code to release the lock for this options-tab
 // session. The lock re-applies on next page load if watch progress remains.
 
 const settingsUnlocked = new Set(); // section IDs that have been unlocked in-session
@@ -1031,7 +1031,7 @@ function renderUnlockModal({ onUnlock }) {
   const sub = document.createElement("p");
   sub.className = "unlock-sub";
   sub.textContent =
-    "Type the code below exactly to confirm. This friction is intentional — pause and decide whether you really want to change the limit mid-day.";
+    "Type the code below exactly to confirm. This friction is intentional - pause and decide whether you really want to change the limit mid-day.";
   card.appendChild(sub);
 
   const codeDisplay = document.createElement("div");
@@ -1078,7 +1078,7 @@ function renderUnlockModal({ onUnlock }) {
   codeDisplay.addEventListener("copy", e => e.preventDefault());
   codeDisplay.addEventListener("cut", e => e.preventDefault());
 
-  // Block paste into the input — typing only.
+  // Block paste into the input - typing only.
   input.addEventListener("paste", e => e.preventDefault());
   input.addEventListener("drop", e => e.preventDefault());
 
@@ -1118,7 +1118,7 @@ document.addEventListener("click", event => {
 });
 
 // The Debug tab is a support/power-user surface, not part of the everyday
-// product — its nav button ships hidden and is revealed only when the page
+// product - its nav button ships hidden and is revealed only when the page
 // is opened (or re-hashed) with #debug in the URL.
 function revealDebugNavIfRequested() {
   if ((location.hash || "").replace(/^#/, "") !== "debug") return;
@@ -1134,7 +1134,7 @@ window.addEventListener("hashchange", () => {
 (async () => {
   await migrateLegacyStorageKeys();
   // Adopt any active Debug fake-clock BEFORE the time-dependent reads below
-  // (day key, daily state, watching lock) — content.js and background.js load
+  // (day key, daily state, watching lock) - content.js and background.js load
   // it at init too; skipping it here would split this page onto the real
   // clock while the rest of the extension runs on the fake one.
   await loadFakeNowOffset();

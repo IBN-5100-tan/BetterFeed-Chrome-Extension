@@ -1,5 +1,5 @@
 /* =============================================================================
- * home.css — styles for the BetterFeed custom home grid.
+ * home.css - styles for the BetterFeed custom home grid.
  *
  * Targets #better-feed-home and its descendants, plus a couple of host-level
  * rules (masthead background, see-you-tomorrow positioning). Loaded by the
@@ -11,12 +11,12 @@
  * ============================================================================= */
 
 /* The --better-feed-* design tokens (and their light-mode overrides) live in
-   preload.css now (loaded at document_start) so features.css — also loaded at
-   document_start — can resolve them before home.css would arrive. */
+   preload.css now (loaded at document_start) so features.css - also loaded at
+   document_start - can resolve them before home.css would arrive. */
 
 /* Guarded by :not(.better-feed-show-native-home) so the native home is
    restored when content.js sets that class (extension disabled, not in Watch
-   mode, or weekly home off) — mirrors the same guard in preload.css. Without
+   mode, or weekly home off) - mirrors the same guard in preload.css. Without
    it this unconditional display:none kept YouTube's home blank when disabled. */
 html:not(.better-feed-show-native-home) ytd-browse[page-subtype="home"] ytd-rich-grid-renderer {
   display: none !important;
@@ -30,7 +30,7 @@ html:not(.better-feed-show-native-home) ytd-browse[page-subtype="home"] #header.
 
 /* NOTE: the marker-mode "hide everything in ytd-browse except our
    container" rule lives in preload.css so it applies at document_start
-   — duplicating it here would just run later and shadow nothing. */
+   - duplicating it here would just run later and shadow nothing. */
 
 #better-feed-home {
   box-sizing: border-box;
@@ -295,7 +295,7 @@ html.better-feed-see-you-tomorrow #better-feed-home .better-feed-see-you {
   height: 56px;
   z-index: 2019;
   margin: 0;
-  /* No horizontal padding — alignWeekHeader pins the element's left/width
+  /* No horizontal padding - alignWeekHeader pins the element's left/width
      to the grid's bounding rect (at every width) so the title sits flush
      with the first card. */
   padding: 0;
@@ -308,7 +308,7 @@ html.better-feed-see-you-tomorrow #better-feed-home .better-feed-see-you {
 /* Fixed 3-column layout at 90% of the centered container
    (repeat(3, minmax(0, 1fr)), margin-inline auto). The only responsive
    override is the max-width:600px query below, which adjusts the home
-   padding — not the column count. */
+   padding - not the column count. */
 #better-feed-home .better-feed-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

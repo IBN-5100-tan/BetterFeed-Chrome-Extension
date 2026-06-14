@@ -1,5 +1,5 @@
 // =============================================================================
-// content.js — the user-visible behavior of BetterFeed.
+// content.js - the user-visible behavior of BetterFeed.
 //
 // Runs on every youtube.com page. Loaded by shared.js (constants + storage
 // helpers) and then takes over once the page is parsed.
@@ -21,12 +21,12 @@
 //   - FILTERS            : Render-time hidden/live filtering of the stored grid.
 //                          (Home-grid parsing/extraction lives in shared.js,
 //                          driven by background.js's HTTP-fetch refresh.)
-//   - WEEKLY GRID RENDER : renderFromStorage — pure read of the stored grid +
+//   - WEEKLY GRID RENDER : renderFromStorage - pure read of the stored grid +
 //                          background-owned refresh status; paints the grid,
 //                          the "Refreshing…" loader, a quiet retry message,
 //                          or an honest terminal message (all-hidden /
 //                          all-live saved set).
-//                          content.js no longer fetches/scrapes/saves — the
+//                          content.js no longer fetches/scrapes/saves - the
 //                          background owns the entire refresh (see background.js
 //                          ensureFreshVideos).
 //   - MAIN / update()    : Single dispatcher. Decides on every navigation /
@@ -50,7 +50,7 @@
 //
 // `update()` is the single entry point that the SPA-navigate listener,
 // the storage-change listener, and the init IIFE all funnel through. It
-// inspects current state and routes to one render branch — there is no
+// inspects current state and routes to one render branch - there is no
 // state machine class, just a tower of `if`s in update().
 // =============================================================================
 
@@ -75,9 +75,9 @@ const BODY_CLASS_HIDE_CREATE_BUTTON = "better-feed-hide-create-button";
 
 let updateInProgress = false;
 // When an update() arrives while another is still running, mark it pending and
-// run it after. Multiple storage.onChanged listeners fire concurrently — e.g.
+// run it after. Multiple storage.onChanged listeners fire concurrently - e.g.
 // STORAGE_VIDEOS_KEY and STORAGE_REFRESH_STATUS_KEY both call update() while
-// renderFromStorage is mid-await — and dropping the second would leave the grid
+// renderFromStorage is mid-await - and dropping the second would leave the grid
 // stale.
 let updatePendingAfterCurrent = false;
 let renderToken = 0;
@@ -94,7 +94,7 @@ function detectAndApplyTheme() {
   if (match[4] !== undefined && Number(match[4]) === 0) return;
   // Bail if nothing changed. Otherwise the setProperty below rewrites the
   // inline style attribute, which the MutationObserver (attributes:true) sees
-  // as a change and re-invokes us — needless churn on every unrelated
+  // as a change and re-invokes us - needless churn on every unrelated
   // attribute mutation.
   if (bg === _lastDetectedBg) return;
   _lastDetectedBg = bg;
@@ -131,7 +131,7 @@ function ensureThemeObserver() {
 // [body class, settings flag] for each cleanup toggle. Driven as a table so
 // applyFeatureSettings stays a single loop instead of 13 repeated lines.
 // Mirrored by FEATURE_CLASSES_EARLY in early.js (the exact-match allowlist
-// for the localStorage replay) — update both when adding a toggle.
+// for the localStorage replay) - update both when adding a toggle.
 const FEATURE_CLASS_SETTINGS = [
   [BODY_CLASS_HIDE_SHORTS, "hideShorts"],
   [BODY_CLASS_HIDE_WATCH_RECS, "hideWatchRecs"],
@@ -255,7 +255,7 @@ function alignWeekHeader() {
   const header = container?.querySelector(".better-feed-week-header");
   if (!container || !header) return;
 
-  // Anchor to the grid rather than the full-width container — the grid is
+  // Anchor to the grid rather than the full-width container - the grid is
   // capped at max-width and centered, so using the container's rect would
   // pin the title to the left edge of the parent rather than the cards.
   const grid = container.querySelector(".better-feed-grid");
@@ -293,14 +293,14 @@ async function renderCustomHome(videos, options = {}) {
 
   // Both callers (renderFromStorage / refreshVisibleVideosAfterHide) already
   // hidden-filter the fixed weekly set before passing it in, so we don't re-read
-  // hidden here — a second (microtask-fresher) read could momentarily collapse
+  // hidden here - a second (microtask-fresher) read could momentarily collapse
   // the grid to empty if a hide landed between the caller's read and this one.
   const visibleVideos = videos;
   const unwatched = visibleVideos.filter(v => !watched.has(v?.videoId));
   const watchedVideos = visibleVideos.filter(v => watched.has(v?.videoId));
   // No slice here: callers pass the already-truncated weekly set (the first
   // videoCount saved videos). Hiding/live-filtering removes from that fixed set
-  // and the grid shrinks — we deliberately do NOT backfill from any extra saved
+  // and the grid shrinks - we deliberately do NOT backfill from any extra saved
   // videos, so a hidden video stays gone rather than being replaced by a new one.
   const orderedVideos = [...unwatched, ...watchedVideos];
 
@@ -323,7 +323,7 @@ async function renderCustomHome(videos, options = {}) {
     // Progress entries can be in three shapes depending on origin:
     //   - { position, duration }  (local; full data)
     //   - { position, duration: 0 } (hydrated from sync; duration unknown)
-    //   - number  (raw legacy/sync form — defensive)
+    //   - number  (raw legacy/sync form - defensive)
     // Position drives the seek, duration drives the bar fraction. When the
     // stored duration is missing we fall back to parsing video.duration.
     const rawProgress = progressMap?.[video?.videoId];
@@ -525,9 +525,9 @@ async function renderCustomHome(videos, options = {}) {
 
   if (myToken !== renderToken) return;
 
-  // Only the FIRST paint of the custom home resets scroll. A re-render — e.g. a
+  // Only the FIRST paint of the custom home resets scroll. A re-render - e.g. a
   // sibling tab flushing watch progress / daily state into storage fires our
-  // storage.onChanged → update() → renderFromStorage — must keep the user's
+  // storage.onChanged → update() → renderFromStorage - must keep the user's
   // scroll position; otherwise a periodic background storage write repeatedly
   // yanks the page to the top while they're reading further down (seen on
   // Firefox, where background tabs still run the scroll). The remove→prepend is
@@ -699,7 +699,7 @@ function positionPopoverBelowButton(popover, refElement) {
   popover.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
 }
 
-// Same routing as the render container lookup, by construction — if YouTube
+// Same routing as the render container lookup, by construction - if YouTube
 // renames the home browse selector, both the page test and the container
 // lookup move together.
 function isHomePage() {
@@ -720,7 +720,7 @@ function applyMarkerModeClass() {
   );
   // Watch mode keeps the expanded sidebar usable but suppresses the
   // collapsed mini-guide (Home/Shorts/Subscriptions icons). The expanded
-  // ytd-guide-renderer is unaffected — only the mini-guide is hidden, so
+  // ytd-guide-renderer is unaffected - only the mini-guide is hidden, so
   // collapsing the drawer leaves a clean empty rail.
   document.documentElement.classList.toggle(
     "better-feed-watch-mode",
@@ -789,7 +789,7 @@ let markModeReadyInFlight = false;
 
 async function markModeReady() {
   // Apply the queued sidebar default BEFORE lifting pre-ready so the
-  // drawer animation plays out invisibly. Idempotent — multiple render
+  // drawer animation plays out invisibly. Idempotent - multiple render
   // functions call this and only the first run does the apply.
   if (pendingSidebarMode && !markModeReadyInFlight) {
     markModeReadyInFlight = true;
@@ -922,7 +922,7 @@ function formatWeekRange(settings, now = new Date(getNow())) {
 // background owns the refresh and needs them); referenced via shared global scope.
 
 /* ---------- WEEKLY VIDEO METADATA REBUILD (post-sync hydration) ---------- */
-// Sync ships the weekly grid as IDs only — title/channel are recovered via
+// Sync ships the weekly grid as IDs only - title/channel are recovered via
 // YouTube's oEmbed endpoint after the IDs land locally. Stubs (entries with
 // empty title) get filled in here. Thumbnails work without metadata because
 // applyThumbnailFallbacks derives URLs from the videoId.
@@ -947,8 +947,8 @@ const enqueueVideoWrite = makeSerialQueue();
 
 // Single helper used by both the channel-avatar and watch-metrics paths.
 // Streams the response, runs the extractor on the growing buffer, and
-// cancels the moment the extractor returns a hit — typical read is 8–32 KB
-// vs the 1–2 MB the full page would be. If streaming finishes without a
+// cancels the moment the extractor returns a hit - typical read is 8-32 KB
+// vs the 1-2 MB the full page would be. If streaming finishes without a
 // match (rare; happens when the target data is past the scan cap), falls
 // back to a full-body fetch so the call is guaranteed to land any data
 // that exists in the page at all.
@@ -976,7 +976,7 @@ async function fetchAndExtractFromPage(url, maxBytes, extractor) {
       if (result) return result;
     }
   } catch (_) { /* fall through to full body */ }
-  // Full-body fallback. Slower but bounded — guarantees we don't miss
+  // Full-body fallback. Slower but bounded - guarantees we don't miss
   // anything the page actually contained.
   try {
     const resp = await fetch(url, { credentials: "omit" });
@@ -1012,7 +1012,7 @@ function extractVideoMetricsFromHtml(html) {
   if (detailsIdx === -1 && !html.includes('"publishDate":')) return null;
 
   // videoDetails has nested objects (e.g., thumbnail), so we can't scope by
-  // the next "}". Just grab a generous window after the marker — the simple
+  // the next "}". Just grab a generous window after the marker - the simple
   // string fields we want are all within the first ~6 KB.
   const block = detailsIdx >= 0
     ? html.substring(detailsIdx, Math.min(detailsIdx + 8192, html.length))
@@ -1039,7 +1039,7 @@ function extractVideoMetricsFromHtml(html) {
     /"label":"Members (?:only|first)"/i.test(html) ||
     /"isMembersOnly":\s*true/i.test(html);
 
-  // Live detection — videoDetails carries a few authoritative flags.
+  // Live detection - videoDetails carries a few authoritative flags.
   // `isLiveContent` catches past-live-stream VODs too; `isLive` is the
   // current-live signal; `isUpcoming` covers scheduled premieres/streams.
   const isLive =
@@ -1126,7 +1126,7 @@ async function applyVideoMetricsToStorage(metricsByVideoId) {
 
     // A successful fetch can still leave the entry stub-shaped (watch page
     // with no views/date or no length). Count those toward
-    // MAX_METRICS_ATTEMPTS exactly like failures — otherwise the stub filter
+    // MAX_METRICS_ATTEMPTS exactly like failures - otherwise the stub filter
     // re-selects the video and its watch page (~250 KB) is re-downloaded on
     // every page load forever.
     const stillMetricsStub = !nextMetadata || !nextDuration;
@@ -1188,8 +1188,8 @@ function extractChannelAvatarFromHtml(html) {
 // Apply oEmbed results to the stored grid in a single write. Re-reads first
 // to avoid clobbering a fresh weekly refresh that might have landed mid-fetch.
 // Fills in any missing field individually (title, channelName, channelUrl) so
-// a card with a title but no channel info — typical of the multi-channel
-// byline scrape miss — still gets repaired.
+// a card with a title but no channel info - typical of the multi-channel
+// byline scrape miss - still gets repaired.
 async function applyOEmbedResultsToStorage(oEmbedByVideoId) {
   if (Object.keys(oEmbedByVideoId).length === 0) return;
   const current = await getStoredWeeklyVideos();
@@ -1241,7 +1241,7 @@ async function applyAvatarsToStorage(avatarsByChannelUrl) {
   }
 }
 
-// Bounded pool — runs jobs with at most N in flight at once. Lets us share a
+// Bounded pool - runs jobs with at most N in flight at once. Lets us share a
 // concurrency budget across the two phases instead of waiting for one to
 // finish before the next starts.
 async function runWithConcurrency(jobs, limit) {
@@ -1282,9 +1282,9 @@ async function rebuildVideoMetadataIfNeeded() {
     // completes, so the grid populates progressively: titles in ~1 s,
     // then view/date/duration and avatars over the next few seconds.
 
-    // PHASE 1 — oEmbed for titles + channel info. Fast (~1 KB per video).
+    // PHASE 1 - oEmbed for titles + channel info. Fast (~1 KB per video).
     // Also runs for entries that have a title but are missing channelName or
-    // channelUrl — multi-channel bylines (collabs, fundraisers) can confuse
+    // channelUrl - multi-channel bylines (collabs, fundraisers) can confuse
     // the home-grid scrape, and oEmbed's author_name/author_url always points
     // at the primary channel, so this is the cleanest backfill.
     const titlePhase = (async () => {
@@ -1300,7 +1300,7 @@ async function rebuildVideoMetadataIfNeeded() {
       return results;
     })();
 
-    // PHASE 2 — watch page for view count / publish date / duration /
+    // PHASE 2 - watch page for view count / publish date / duration /
     // members-only flag. One fetch per video; videoDetails sits near the top
     // of body and member-badge JSON sits in the same fetch.
     const metricsPhase = (async () => {
@@ -1319,7 +1319,7 @@ async function rebuildVideoMetadataIfNeeded() {
       await enqueueVideoWrite(() => applyVideoMetricsToStorage(results));
     })();
 
-    // PHASE 3 — channel pages for avatars, deduped by channel URL.
+    // PHASE 3 - channel pages for avatars, deduped by channel URL.
     // We need channelUrl before we can fetch, which for stubs comes from
     // phase 1. Wait for phase 1 to finish before kicking off phase 3.
     const avatarPhase = (async () => {
@@ -1351,7 +1351,7 @@ async function rebuildVideoMetadataIfNeeded() {
 
 function getChannelHideKey(video) {
   // Use shared.js decodeHtmlEntities (not content.js decodeHtml) so this WRITE
-  // key matches what shared.js isVideoHidden derives on the MATCH side — the
+  // key matches what shared.js isVideoHidden derives on the MATCH side - the
   // two decoders diverge on named entities (é, &nbsp;, …) and would otherwise
   // produce keys that don't compare equal for a name:-fallback channel.
   const channelUrl = decodeHtmlEntities(video?.channelUrl || "").trim().toLowerCase();
@@ -1435,7 +1435,7 @@ async function refreshVisibleVideosAfterHide() {
 
   const { visible } = computeVisibleWeeklySet(stored.videos, settings, hidden);
 
-  // The whole weekly set is hidden — hand off to update() so renderFromStorage
+  // The whole weekly set is hidden - hand off to update() so renderFromStorage
   // shows the loader / retry / nudge rather than an empty grid.
   if (visible.length === 0) {
     update();
@@ -1445,7 +1445,7 @@ async function refreshVisibleVideosAfterHide() {
   await renderCustomHome(visible, { preserveScroll: true });
 }
 
-// THE fixed-weekly-set pipeline — single copy on purpose, the ordering is
+// THE fixed-weekly-set pipeline - single copy on purpose, the ordering is
 // load-bearing and is shared by renderFromStorage (navigation renders) and
 // refreshVisibleVideosAfterHide (hide-triggered re-renders):
 //  1. Render every video that has a videoId. A stub whose title hasn't
@@ -1454,10 +1454,10 @@ async function refreshVisibleVideosAfterHide() {
 //     on EVERY title being present would wedge a fully-synced device (whose
 //     grid arrives as all-stubs) on a permanent loader when oEmbed is down.
 //  2. Drop live streams from the candidate POOL first, so a late-detected
-//     live video is BACKFILLED by a fresh one from the over-scrape reserve —
+//     live video is BACKFILLED by a fresh one from the over-scrape reserve -
 //     we always want videoCount watchable videos in place.
 //  3. Lock in the FIXED weekly set: the first videoCount of that pool.
-//  4. Hiding removes from THIS set WITHOUT backfilling — once you have your
+//  4. Hiding removes from THIS set WITHOUT backfilling - once you have your
 //     videos for the week, hiding them must not surface new ones until the
 //     next scheduled refresh.
 function computeVisibleWeeklySet(storedVideos, settings, hidden) {
@@ -1565,7 +1565,7 @@ async function renderFromStorage() {
   const status = statusData[STORAGE_REFRESH_STATUS_KEY];
   const state = status && status.state;
 
-  // The weekly set exists but the user hid all of it — show an honest terminal
+  // The weekly set exists but the user hid all of it - show an honest terminal
   // message, NOT the "Refreshing" spinner. The background won't re-scrape to
   // backfill hidden videos (fixed-set design), so the spinner would never
   // resolve; skip the nudge too since the saved grid is already fresh.
@@ -1574,7 +1574,7 @@ async function renderFromStorage() {
     return;
   }
 
-  // Videos ARE saved, but live-filtering emptied the pool — every entry
+  // Videos ARE saved, but live-filtering emptied the pool - every entry
   // (including the over-scrape reserve) got flagged live after save. Unless a
   // refresh is actually in flight, the spinner below would never resolve (the
   // nudge no-ops while refreshAfter is in the future), so show an honest
@@ -1592,10 +1592,10 @@ async function renderFromStorage() {
 
   // No videos saved yet (cold / refreshing). Pick the loader vs. a quiet retry
   // message from the background-owned refresh status. We never show a terminal
-  // "reload to try again" error — the background retries on its alarm and the
+  // "reload to try again" error - the background retries on its alarm and the
   // storage onChanged re-renders us when videos land.
   if (state === "error") {
-    renderLoadingMessage("Couldn't load this week's videos — retrying shortly.");
+    renderLoadingMessage("Couldn't load this week's videos - retrying shortly.");
   } else {
     renderRefreshingLoading();
   }
@@ -1621,7 +1621,7 @@ async function onHomePage() {
   }
   updateInProgress = true;
 
-  // Leaving a /watch page for the home grid — drop any stale live-chat state set
+  // Leaving a /watch page for the home grid - drop any stale live-chat state set
   // on <html> while watching a live video (idempotent; inert on home but tidy).
   stopWatchLiveChatPresence();
 
@@ -1645,7 +1645,7 @@ async function onHomePage() {
 
     // A fresh-tab navigation that already has a saved mode shows the mode picker
     // to re-confirm the pick. Don't paint the grid (or lift the pre-ready fade)
-    // underneath it first — that flashed the custom home for a moment before the
+    // underneath it first - that flashed the custom home for a moment before the
     // picker appeared. maybeShowModePicker() renders the picker; once the user
     // picks, onModePicked clears the flag and re-renders.
     if (freshTabAwaitingMode) {
@@ -1654,7 +1654,7 @@ async function onHomePage() {
 
     if (!modeLoaded) {
       // Mode has not yet been read from chrome.storage. Never run a
-      // mode-specific render against a stale or null currentMode — this is
+      // mode-specific render against a stale or null currentMode - this is
       // the exact window where a Work pick could transiently fall through to
       // a Watch-only weekly refresh. loadCurrentMode (init) and the mode
       // onChanged branch both set modeLoaded; a deferred/subsequent update()
@@ -1695,14 +1695,14 @@ async function onHomePage() {
   } catch (err) {
     // A rejected storage read (e.g. "Extension context invalidated" after an
     // extension reload orphans this script) must never strand the pre-ready
-    // fade — that's a permanently dark, pointer-events:none tab. Lift the
+    // fade - that's a permanently dark, pointer-events:none tab. Lift the
     // gate and let YouTube's own shell show instead.
     console.warn("BetterFeed: onHomePage render failed", err);
     markModeReady();
   } finally {
     updateInProgress = false;
     // If anything tried to run an update while this one was in-flight, honor
-    // it now — concurrent storage.onChanged events queue up while
+    // it now - concurrent storage.onChanged events queue up while
     // renderFromStorage awaits its reads + DOM work, and dropping the pending
     // request would leave the UI stale.
     if (updatePendingAfterCurrent) {
@@ -1735,7 +1735,7 @@ function watchLiveChatPresence() {
   // rAF gate coalesces YouTube's frequent DOM mutations into one check per frame.
   updateLiveChatPresence();
   // Idempotent per video: onNonHomePage() calls this on every update(), and the
-  // daily-state flush fires update() ~every 5s on /watch — re-arming each time
+  // daily-state flush fires update() ~every 5s on /watch - re-arming each time
   // would reset the 12s disconnect timer forever (a body-subtree observer
   // running the whole video). Only (re-)arm on an actual video change.
   const vid = getWatchPageVideoId();
@@ -1839,7 +1839,7 @@ async function maybeReEnterColdStart() {
     clearTimeout(coldStartTimer);
     coldStartTimer = null;
   }
-  // Also stop any poll timer left over from a prior cold-start session — the
+  // Also stop any poll timer left over from a prior cold-start session - the
   // `if (coldStartPollTimer) return` guard in startColdStartPolling prevents
   // a duplicate but not an orphan still calling hydrateFromSync on a loop.
   stopColdStartPolling();
@@ -2386,7 +2386,7 @@ const MODE_CARDS = [
   {
     id: MODE_WATCH,
     name: "Watch",
-    desc: "Distraction-free YouTube — curated weekly grid, cleanup, and daily limits."
+    desc: "Distraction-free YouTube - curated weekly grid, cleanup, and daily limits."
   },
   {
     id: MODE_WORK,
@@ -2476,7 +2476,7 @@ function formatSessionRemaining(ms) {
   return `${formatTimeRemainingShort(ms)} remaining`;
 }
 
-// H:MM:SS / M:SS, no trailing label — formatSessionRemaining wraps this when
+// H:MM:SS / M:SS, no trailing label - formatSessionRemaining wraps this when
 // a standalone "remaining" suffix is wanted.
 function formatTimeRemainingShort(ms) {
   const total = Math.ceil(ms / 1000);
@@ -2601,7 +2601,7 @@ function tickPickerLockDisplay() {
     clearPickerTick();
     return;
   }
-  // Skip when the picker has transitioned to the session-length sub-step —
+  // Skip when the picker has transitioned to the session-length sub-step -
   // no Watch card present then.
   const watchCard = picker.querySelector('[data-mode="watch"]');
   if (!watchCard) return;
@@ -2611,7 +2611,7 @@ function tickPickerLockDisplay() {
   if (isWorkSessionLockActive()) {
     desc.textContent = watchLockDescriptionText();
   } else if (watchCard.classList.contains("better-feed-mode-card-locked")) {
-    // Lock just ended — restore the Watch card to its normal state.
+    // Lock just ended - restore the Watch card to its normal state.
     watchCard.classList.remove("better-feed-mode-card-locked");
     const watchMeta = MODE_CARDS.find(c => c.id === MODE_WATCH);
     if (watchMeta) desc.textContent = watchMeta.desc;
@@ -2696,7 +2696,7 @@ function renderModePicker() {
       }
       if (isWorkLikeMode(card.id) && !isWorkSessionActive()) {
         // Snapshot the mode-cards content so the sub-step's Back button can
-        // restore it in place — covers the "accidentally clicked Work" case.
+        // restore it in place - covers the "accidentally clicked Work" case.
         const savedChildren = Array.from(inner.childNodes);
         renderSessionLengthSubpicker(inner, {
           onBack: () => inner.replaceChildren(...savedChildren)
@@ -2725,7 +2725,7 @@ function renderModePicker() {
       removeModePicker();
       // onHomePage suppressed all rendering while the picker was up (and the
       // native home is hidden for Watch mode), so paint the real mode UI now
-      // that the gate is clear — otherwise dismissing via X leaves a blank page.
+      // that the gate is clear - otherwise dismissing via X leaves a blank page.
       update();
     });
     overlay.appendChild(closeBtn);
@@ -2737,7 +2737,7 @@ function renderModePicker() {
   overlay.appendChild(inner);
 
   (document.body || document.documentElement).appendChild(overlay);
-  // Trigger the fade-in by setting the visible class on the next frame —
+  // Trigger the fade-in by setting the visible class on the next frame -
   // the browser needs to paint the opacity:0 state first for the
   // transition to fire.
   requestAnimationFrame(() => {
@@ -2814,7 +2814,7 @@ async function renderSessionLengthSubpicker(inner, { noGrace = false, onBack = n
 
   inner.appendChild(cards);
 
-  // Custom form — hidden until "Custom" is clicked. Pre-populated with the
+  // Custom form - hidden until "Custom" is clicked. Pre-populated with the
   // last custom value (stored in settings.workCustomMinutes).
   const customForm = document.createElement("div");
   customForm.className = "better-feed-custom-session-form";
@@ -2976,7 +2976,7 @@ function buildWorkClock() {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.id = WORK_CLOCK_ID;
-  btn.title = "Work session — hover for remaining time";
+  btn.title = "Work session - hover for remaining time";
   btn.innerHTML =
     '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">' +
     '<path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16zm.5-13H11v6l5 3 .8-1.3-4.3-2.6V7z"/>' +
@@ -3055,7 +3055,7 @@ function cancelHideWorkClockPopover() {
 }
 
 function scheduleHideWorkClockPopover() {
-  // Sticky while the user is picking a new session — only the outside-click
+  // Sticky while the user is picking a new session - only the outside-click
   // listener can close the popover in that mode.
   if (workClockPopoverMode === "selecting") return;
   cancelHideWorkClockPopover();
@@ -3069,7 +3069,7 @@ function describeSessionForPopover() {
   // No-time runs are intentionally NOT surfaced as sessions in the popover:
   // they look like "no session active" and only offer the New-session button.
   // The underlying 20-min Watch lock is still enforced by the picker / mode
-  // change flow — the popover just doesn't broadcast it.
+  // change flow - the popover just doesn't broadcast it.
   if (!workSession || workSession.noTime) {
     return { text: "No active session", showEndButton: false, showNewButton: true };
   }
@@ -3086,7 +3086,7 @@ function renderWorkClockPopoverContent(popover) {
   if (workClockPopoverMode === "selecting") {
     popover.classList.add("better-feed-work-clock-popover-selecting");
     // Render the session-length sub-step directly into the popover. noGrace
-    // is true because this path is "user re-committing mid-Work" — same
+    // is true because this path is "user re-committing mid-Work" - same
     // behavior as the old standalone picker. The popover variant hides the
     // no-time option and omits the back button (outside-click dismisses).
     renderSessionLengthSubpicker(popover, {
@@ -3166,7 +3166,7 @@ function showWorkClockPopover() {
   popover.addEventListener("mouseenter", cancelHideWorkClockPopover);
   popover.addEventListener("mouseleave", scheduleHideWorkClockPopover);
 
-  // Tick once a second while open — refresh the entire content so we pick up
+  // Tick once a second while open - refresh the entire content so we pick up
   // session/lock transitions and the end-of-timed-session popup trigger.
   // In selecting mode the popover content is an interactive picker, so we
   // skip refreshing to avoid wiping form state on every tick.
@@ -3193,7 +3193,7 @@ function buildDailyLimitButton() {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.id = DAILY_LIMIT_BUTTON_ID;
-  btn.title = "Daily limit — click for today's stats";
+  btn.title = "Daily limit - click for today's stats";
   // Material Icons "hourglass_empty" path.
   btn.innerHTML =
     '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">' +
@@ -3216,7 +3216,7 @@ function tryInsertDailyLimitButton() {
   if (!btn) btn = buildDailyLimitButton();
 
   // Sit to the LEFT of the mode switcher (same slot the work-clock uses in
-  // Work mode — they're mutually exclusive since they key off mode).
+  // Work mode - they're mutually exclusive since they key off mode).
   const switcher = document.getElementById(MODE_SWITCHER_ID);
   const positionBefore =
     switcher && switcher.parentElement === anchor.parentElement ? switcher : anchor;
@@ -3354,7 +3354,7 @@ function toggleDailyLimitPopover() {
 }
 
 /* ---------- WORK SESSION UNLOCK CHALLENGE ---------- */
-// Lets the user end a session early — but only by typing a fresh 16-20 digit
+// Lets the user end a session early - but only by typing a fresh 16-20 digit
 // numeric code shown on screen, no spaces, no paste, no select-copy on the
 // display. Friction is the point: ending early should require a deliberate,
 // annoying action so it doesn't happen impulsively.
@@ -3399,7 +3399,7 @@ function setupModalDialog(overlay, card, titleEl) {
 
 function renderWorkUnlockModal({ targetMode } = {}) {
   document.getElementById(WORK_UNLOCK_ID)?.remove();
-  // Allow the challenge whenever a session is active — even outside the lock
+  // Allow the challenge whenever a session is active - even outside the lock
   // window, the user explicitly opted into friction by picking the session.
   if (!isWorkSessionActive()) return;
 
@@ -3419,7 +3419,7 @@ function renderWorkUnlockModal({ targetMode } = {}) {
   const sub = document.createElement("p");
   sub.className = "better-feed-work-unlock-sub";
   sub.textContent =
-    "Type the code below exactly to confirm. This friction is intentional — pause and decide whether you really want to leave focus.";
+    "Type the code below exactly to confirm. This friction is intentional - pause and decide whether you really want to leave focus.";
   card.appendChild(sub);
 
   const codeDisplay = document.createElement("div");
@@ -3454,7 +3454,7 @@ function renderWorkUnlockModal({ targetMode } = {}) {
   confirmBtn.addEventListener("click", async () => {
     if (input.value !== code) return;
     overlay.remove();
-    // Manual end — never show the "Start new session?" popup. If the user
+    // Manual end - never show the "Start new session?" popup. If the user
     // is going to a different mode, also switch.
     await endWorkSession({ silent: true });
     if (targetMode && VALID_MODES.includes(targetMode)) {
@@ -3507,7 +3507,7 @@ function showStandaloneSessionLengthPicker() {
   inner.className = "better-feed-mode-picker-inner";
 
   // Sessions started from the clock popover / session-ended popup skip the
-  // 15-second grace window — the user is re-committing mid-Work, no
+  // 15-second grace window - the user is re-committing mid-Work, no
   // fat-finger window required.
   renderSessionLengthSubpicker(inner, {
     noGrace: true,
@@ -3656,7 +3656,7 @@ async function onModePicked(mode) {
   if (!isWorkLikeMode(mode) && isWorkSessionLockActive()) return;
 
   // Leaving Work/Listen mode through normal picker navigation should end the
-  // session (silently — the user has chosen to move on). The password
+  // session (silently - the user has chosen to move on). The password
   // challenge path clears the session before calling onModePicked, so this
   // is a no-op for that flow.
   if (workSession && !isWorkLikeMode(mode)) {
@@ -3674,7 +3674,7 @@ async function onModePicked(mode) {
   // "Home-ish" means a page that's either the vanilla YouTube home or one of
   // our marker URLs. Picking a mode on those pages should navigate to the new
   // mode's marker URL. Any other page (watch, search, channel, playlist, etc.)
-  // is somewhere the user intentionally went — we apply the mode in place and
+  // is somewhere the user intentionally went - we apply the mode in place and
   // leave them on the page they came for.
   const onHomeishPage =
     startingPath === "/" ||
@@ -3754,7 +3754,7 @@ function renderSeeYouTomorrow(settings) {
 
   const sub = document.createElement("div");
   sub.className = "better-feed-see-you-sub";
-  sub.textContent = `Daily limit reached — resets at ${formatResetTime(settings)}.`;
+  sub.textContent = `Daily limit reached - resets at ${formatResetTime(settings)}.`;
 
   wrap.appendChild(title);
   wrap.appendChild(sub);
@@ -3817,8 +3817,8 @@ ensureThemeObserver();
 (async () => {
   // Watchdog for the pre-ready fade (set by early.js, lifted by
   // markModeReady): if anything in init or the first render rejects before
-  // markModeReady runs — e.g. chrome.storage throwing "Extension context
-  // invalidated" after an extension reload — the tab would otherwise stay
+  // markModeReady runs - e.g. chrome.storage throwing "Extension context
+  // invalidated" after an extension reload - the tab would otherwise stay
   // dark and unclickable forever. Removing the class is idempotent, so this
   // is a no-op on the healthy path (it's long gone by 10s).
   setTimeout(() => {
@@ -3829,7 +3829,7 @@ ensureThemeObserver();
   // the first load after the rename. Must run BEFORE the loadX() calls below
   // so they read from the migrated keys, not the empty new ones.
   await migrateLegacyStorageKeys();
-  // Init reads can run in parallel — none depend on each other.
+  // Init reads can run in parallel - none depend on each other.
   await Promise.all([
     loadFakeNowOffset(),
     loadCurrentMode(),
@@ -3855,12 +3855,12 @@ ensureThemeObserver();
 
   // Force the picker on freshly-opened YouTube tabs (typed URL, bookmark,
   // external link), but NOT on internal Cmd-click / SPA / reload / back-forward
-  // — and NOT when the tab lands directly on a video while a mode is already
+  // - and NOT when the tab lands directly on a video while a mode is already
   // active. Opening a video in a new tab from an in-mode tab is a deliberate
   // continuation of that mode, and the referrer heuristic alone can't be
   // trusted to detect it (Brave shields / Firefox strict privacy can strip
   // even same-origin referrers, making the new tab look "fresh"). A no-mode
-  // state still prompts on /watch — there's nothing to continue.
+  // state still prompts on /watch - there's nothing to continue.
   // Skipped during cold start since it already owns the picker's timing.
   if (!coldStart && currentMode && location.pathname !== "/watch" && isFreshTabNavigation()) {
     freshTabAwaitingMode = true;
@@ -3918,7 +3918,7 @@ window.addEventListener("pagehide", () => {
   // the daily state immediately, so they aren't lost locally and the debounced
   // seconds reach sync on a hard close. Same unload caveat as flushProgressToSync.
   // The push must be sequenced AFTER the flush commits (mirroring
-  // stopWatchTracking) — pushed first it would ship the pre-flush state, and
+  // stopWatchTracking) - pushed first it would ship the pre-flush state, and
   // the debounced timer the flush arms never fires in an unloading page.
   if (watchTrackPendingSeconds > 0) {
     getSettings()
@@ -3981,7 +3981,7 @@ function getActiveVideoEl() {
 // finished, so the seconds-flush and the video-count write can interleave
 // across ticks and clobber each other's snapshot (lost watch-seconds or a
 // lost counted videoId). Routing both through one chain makes them atomic
-// w.r.t. each other — same pattern as modifyHidden/modifyWatched.
+// w.r.t. each other - same pattern as modifyHidden/modifyWatched.
 let _dailyStateChain = Promise.resolve();
 function queueDailyStateUpdate(fn) {
   const run = _dailyStateChain.then(() => fn()).catch(() => undefined);
@@ -4023,7 +4023,7 @@ async function flushWatchSeconds(settings) {
   watchTrackLastFlushTime = getNow();
   const result = await queueDailyStateUpdate(async () => {
     // Resolve the device id BEFORE reading state so there's no await between the
-    // read and the write — otherwise a background applySyncChangeToLocal could
+    // read and the write - otherwise a background applySyncChangeToLocal could
     // merge a peer's bucket into storage in that gap and our write would clobber
     // it (cross-realm: the content and sync chains don't share a lock).
     const id = await getDeviceId();
@@ -4033,7 +4033,7 @@ async function flushWatchSeconds(settings) {
     await saveDailyState(state);
     return state;
   });
-  // Routine seconds flush — debounced push (don't burn sync quota every 5s).
+  // Routine seconds flush - debounced push (don't burn sync quota every 5s).
   scheduleDailyStateSync();
   return result;
 }
@@ -4130,7 +4130,7 @@ async function tickWatchTracking() {
 
   const grace = await getDailyGrace(settings);
   // An active grace pauses limit tracking. Minutes-grace EXPIRY is handled by
-  // armGraceExpirationTimer + maybeEnforceGraceOnNavigation — an in-tick expiry
+  // armGraceExpirationTimer + maybeEnforceGraceOnNavigation - an in-tick expiry
   // check here would be dead code, since isGraceActiveForLocation already
   // returns false once a minutes grace has passed its expiry.
   if (isGraceActiveForLocation(grace, location)) return;
@@ -4167,7 +4167,7 @@ async function tickWatchTracking() {
   // in-flight flush. flushWatchSeconds zeroes watchTrackPendingSeconds
   // synchronously but commits to storage inside the chain, so an UNchained read
   // here could see the old secondsWatched while pending already excludes those
-  // seconds — a transient under-count. Queuing the read serializes it after the
+  // seconds - a transient under-count. Queuing the read serializes it after the
   // pending write lands.
   const state = await queueDailyStateUpdate(() => getDailyState(settings));
   const myId = await getDeviceId();
@@ -4285,7 +4285,7 @@ async function tickWatchedMarking() {
   const remaining = duration - currentTime;
   const fraction = Math.max(0, Math.min(1, currentTime / duration));
 
-  // Skip the position:0 / negligible-progress write — it pollutes sync with
+  // Skip the position:0 / negligible-progress write - it pollutes sync with
   // no observable value and the progress bar renderer ignores 0 anyway.
   if (currentTime > 0 && Math.abs(fraction - watchedMarkLastWrittenFraction) >= PROGRESS_WRITE_DELTA) {
     watchedMarkLastWrittenFraction = fraction;
@@ -4299,7 +4299,7 @@ async function tickWatchedMarking() {
   //  - ≥ 90% of the duration played, ONLY for videos at or under the 20s
   //    threshold where the remaining-time rule is gated off (e.g. a
   //    15-second clip). Unconditioned, the 90% clause would preempt the 20s
-  //    rule on anything longer than ~3m20s — marking a 2-hour video watched
+  //    rule on anything longer than ~3m20s - marking a 2-hour video watched
   //    (and halting progress-resume writes) with 12 minutes still to go.
   const reachedThreshold =
     videoEl.ended ||
@@ -4353,7 +4353,7 @@ function showChannelConfirm(targetUrl, { newTab = false } = {}) {
   yesBtn.textContent = "Yes, go to channel";
   yesBtn.addEventListener("click", () => {
     overlay.remove();
-    // Honor the original gesture: a middle-click meant "open in a new tab" —
+    // Honor the original gesture: a middle-click meant "open in a new tab" -
     // navigating the current tab instead would clobber the page the user
     // deliberately kept.
     if (newTab) {
@@ -4378,7 +4378,7 @@ function onWorkModeLinkClick(event) {
   if (!isWorkLikeMode(currentMode)) return;
 
   // auxclick fires for middle AND right button. Only left (0, via click) and
-  // middle (1, open-in-new-tab intent) are navigations to intercept —
+  // middle (1, open-in-new-tab intent) are navigations to intercept -
   // swallowing right-click (2) would pop the confirm over a context-menu /
   // copy-link gesture that never navigates.
   if (event.button !== 0 && event.button !== 1) return;
@@ -4476,7 +4476,7 @@ async function onGraceChosen(type, seconds) {
   } else {
     // No video id (URL raced/changed between limit-hit and click). A
     // null-videoId "finish" grace would spuriously match any v-less watch URL
-    // and never a real video — just dismiss instead of persisting a bogus grace.
+    // and never a real video - just dismiss instead of persisting a bogus grace.
     dismissDailyLimitPopup();
     return;
   }
@@ -4582,7 +4582,7 @@ async function maybeEnforceGraceOnNavigation() {
 // full update() (grid teardown + ~9 storage reads + image re-decode) for every
 // bump would be sustained 5-second jank for a visually identical result. The
 // home render only depends on daily state via the limit verdict and the day
-// key — re-render only when one of those flips; the popover (which shows the
+// key - re-render only when one of those flips; the popover (which shows the
 // live counts) is refreshed by the caller regardless.
 async function maybeUpdateForDailyStateChange(change) {
   try {
@@ -4630,7 +4630,7 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
     // "Clear local data" wiped the authoritative chrome.storage mode, but the
     // localStorage mode mirror (origin-scoped to this YouTube tab) survives a
     // clear initiated from the options page and would otherwise feed early.js
-    // a stale mode on the next load. Zero it here — but only on a FULL wipe
+    // a stale mode on the next load. Zero it here - but only on a FULL wipe
     // (both keys cleared in one event). A videos-only clear (Debug "Refresh
     // weekly videos now") leaves the mode active, and dropping the mirror then
     // would cost the next page load its anti-flash mode classes.
@@ -4649,11 +4649,11 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
   if (STORAGE_VIDEOS_KEY in changes) {
     update();
     // Sync hydration / cross-device updates may have brought in stub entries
-    // (IDs only) — fill in title/channel from oEmbed in the background.
+    // (IDs only) - fill in title/channel from oEmbed in the background.
     rebuildVideoMetadataIfNeeded().catch(() => {});
   }
 
-  // Background-owned refresh status flipped (idle/refreshing/error) — re-render
+  // Background-owned refresh status flipped (idle/refreshing/error) - re-render
   // so renderFromStorage swaps between the grid, loader, and retry message.
   if (STORAGE_REFRESH_STATUS_KEY in changes) {
     update();
@@ -4684,14 +4684,14 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
     const newValue = changes[STORAGE_MODE_KEY].newValue;
 
     // This tab opened fresh and is still waiting for the user's pick. Don't
-    // auto-adopt a sibling tab's mode change — the picker should stay up.
+    // auto-adopt a sibling tab's mode change - the picker should stay up.
     if (freshTabAwaitingMode) return;
 
     currentMode = VALID_MODES.includes(newValue) ? newValue : null;
     modeLoaded = true;
     // Keep the page-origin localStorage mirror (read synchronously by early.js
     // at document_start) in lockstep with the authoritative chrome.storage
-    // mode — including when the mode is CLEARED (newValue undefined). The
+    // mode - including when the mode is CLEARED (newValue undefined). The
     // background context can never do this (localStorage is undefined in a
     // service worker / event page), and "Clear local data" runs from the
     // options-page origin which cannot touch this tab's localStorage. Without
@@ -4699,7 +4699,7 @@ chrome.storage.onChanged.addListener(async (changes, area) => {
     // wrong mode styling on the next load.
     syncModeToLocalStorage(currentMode);
 
-    // Same-tab mode picks are owned by onModePicked — let it handle the
+    // Same-tab mode picks are owned by onModePicked - let it handle the
     // URL update and navigation. If we also ran the in-place updates
     // below, the picker would fade out and expose the previous-mode UI
     // (or whatever native YT content is underneath on non-home pages)

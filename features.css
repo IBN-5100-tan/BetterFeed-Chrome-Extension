@@ -1,5 +1,5 @@
 /* =============================================================================
- * features.css — feature-toggle rules and the rest of BetterFeed's chrome.
+ * features.css - feature-toggle rules and the rest of BetterFeed's chrome.
  *
  * Two kinds of rules live here:
  *   1. The `html.better-feed-hide-*` / `better-feed-disable-*` toggles that
@@ -9,7 +9,7 @@
  *   2. The reusable overlay / modal / popover surfaces (mode picker,
  *      work-clock, session-length picker, daily-limit popup,
  *      channel-confirm, unlock challenge, session-ended popup, masthead
- *      switcher chip). These don't need to be conditional — the JS creates
+ *      switcher chip). These don't need to be conditional - the JS creates
  *      and destroys the DOM nodes they target.
  *
  * Loaded by the manifest at content_script time. The toggle classes are
@@ -48,7 +48,7 @@ html.better-feed-hide-watch-recs ytd-watch-next-secondary-results-renderer {
 /* Center the player when watch-recs are hidden AND there's no ACTIVE live chat.
    Cross-browser-correct: content.js's watchLiveChatPresence() toggles
    better-feed-live-chat-present from the chat frame's real visibility, so this
-   no longer relies on :has(ytd-live-chat-frame) — which mis-fired on Firefox,
+   no longer relies on :has(ytd-live-chat-frame) - which mis-fired on Firefox,
    where an inert chat frame lingers in the DOM on non-live videos. A user-hidden
    chat (hide-live-chat) collapses the frame to size 0, so it reads as absent
    here too and the player still centers. */
@@ -504,7 +504,7 @@ html.better-feed-light-mode #better-feed-session-length-picker .better-feed-cust
   color: #888;
 }
 
-/* Back link in the full pickers — sits below the session-length cards
+/* Back link in the full pickers - sits below the session-length cards
    (and below the custom form when it's expanded), centered. */
 #better-feed-mode-picker .better-feed-session-length-back,
 #better-feed-session-length-picker .better-feed-session-length-back {
@@ -732,7 +732,7 @@ html.better-feed-light-mode #better-feed-work-clock-popover.better-feed-work-clo
   font-size: 13px;
   font-weight: 500;
 }
-/* Hide the verbose descriptions in popover context — names alone are
+/* Hide the verbose descriptions in popover context - names alone are
    enough at this scale. */
 #better-feed-work-clock-popover.better-feed-work-clock-popover-selecting .better-feed-mode-card-desc {
   display: none;
@@ -1135,7 +1135,7 @@ html.better-feed-light-mode #better-feed-mode-switcher:hover {
   flex-shrink: 0;
 }
 
-/* Daily-limit hourglass icon — sits left of the mode switcher in Watch mode,
+/* Daily-limit hourglass icon - sits left of the mode switcher in Watch mode,
    mirrors the work-clock styling so the two chips look related. */
 #better-feed-daily-limit {
   display: inline-flex;

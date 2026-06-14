@@ -4,12 +4,12 @@
 
    When the extension is disabled OR the weekly home option is off,
    content.js adds the better-feed-show-native-home class to <html>,
-   which makes the :not() selector below stop matching — leaving
+   which makes the :not() selector below stop matching - leaving
    YouTube's own stylesheet free to render the grid normally. */
 
 /* Design tokens live HERE (document_start), not home.css (document_idle),
    because features.css is also loaded at document_start and consumes these
-   custom properties — defining them late would leave its var() usages
+   custom properties - defining them late would leave its var() usages
    unresolved during the document_start -> document_idle window. */
 :root {
   --better-feed-text-primary: #f1f1f1;
@@ -63,7 +63,7 @@ html.better-feed-work-mode ytd-browse:not([page-subtype*="channel"]) > *:not(#be
    YouTube structures subscription channels as direct children of the top
    ytd-guide-section-renderer > #items, while items inside the "You"
    section ("Your channel", History, etc.) are nested one level deeper in
-   ytd-guide-collapsible-section-entry-renderer > #section-items — so the
+   ytd-guide-collapsible-section-entry-renderer > #section-items - so the
    child combinator below catches the subs without touching You. */
 
 /* The "Subscriptions ▾" collapsible header (links to /feed/subscriptions) */
@@ -85,7 +85,7 @@ html.better-feed-work-mode ytd-guide-section-renderer > #items > ytd-guide-entry
   display: none !important;
 }
 
-/* The Home entry at the top of the sidebar — nothing to land on in Work mode */
+/* The Home entry at the top of the sidebar - nothing to land on in Work mode */
 html.better-feed-work-mode ytd-guide-section-renderer > #items > ytd-guide-entry-renderer:has(a[href="/"]) {
   display: none !important;
 }
@@ -94,7 +94,7 @@ html.better-feed-work-mode ytd-guide-section-renderer > #items > ytd-guide-entry
    Includes the container and the older #mini-guide id selectors so YT can't
    leak any of them through a renamed wrapper.
 
-   Applied to Watch mode as well as Work mode — Watch mode's expanded sidebar
+   Applied to Watch mode as well as Work mode - Watch mode's expanded sidebar
    still works normally (ytd-guide-renderer is untouched), but collapsing it
    should leave an empty rail rather than a column of YouTube nav icons. */
 html.better-feed-work-mode ytd-mini-guide-renderer,
@@ -116,10 +116,10 @@ html.better-feed-watch-mode #mini-guide-content {
 
    Two guards keep this from firing when the sidebar is actually being
    shown:
-     :not([guide-persistent-and-visible]) — skip when the expanded sidebar
+     :not([guide-persistent-and-visible]) - skip when the expanded sidebar
        is pinned inline on wide screens (it pushes content right with
        --ytd-guide-width, which we shouldn't reclaim).
-     :not(:has(tp-yt-app-drawer[opened])) — skip when the drawer overlay
+     :not(:has(tp-yt-app-drawer[opened])) - skip when the drawer overlay
        is open. The drawer is fixed-position, so without this guard the
        page-manager slides flush-left under the drawer and the grid
        overlaps the sidebar items. */
@@ -150,8 +150,8 @@ html.better-feed-work-mode ytd-guide-collapsible-section-entry-renderer {
 }
 
 /* See-you-tomorrow state (daily limit reached, Watch mode home). Hide the
-   entire left sidebar — both the expanded drawer and the collapsed
-   mini-guide — the same way Work mode hides the mini-guide. */
+   entire left sidebar - both the expanded drawer and the collapsed
+   mini-guide - the same way Work mode hides the mini-guide. */
 html.better-feed-see-you-tomorrow ytd-guide-renderer,
 html.better-feed-see-you-tomorrow ytd-mini-guide-renderer,
 html.better-feed-see-you-tomorrow ytd-mini-guide-entry-renderer,
@@ -186,7 +186,7 @@ html.better-feed-pre-ready ytd-app {
    retain widths that overflow the viewport, creating a horizontal
    scrollbar. The arrow-key seek keystroke then double-fires as a
    browser-level "scroll right." Suppress horizontal scrolling whenever
-   our mode classes are present — we don't use horizontal layouts
+   our mode classes are present - we don't use horizontal layouts
    anywhere in the extension, so there's nothing legitimate to scroll
    sideways. */
 html.better-feed-watch-mode,

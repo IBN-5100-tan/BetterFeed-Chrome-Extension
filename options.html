@@ -714,7 +714,7 @@
       border-color: var(--danger);
     }
 
-    /* Per-tab reset button — neutral transparent style, sits in a slim
+    /* Per-tab reset button - neutral transparent style, sits in a slim
        footer below the tab's sections rather than inside one. */
     .tab-footer {
       margin-top: 8px;
@@ -732,7 +732,7 @@
       border-color: var(--text-muted);
     }
 
-    /* Reset-all on Advanced — matches the per-tab reset style. */
+    /* Reset-all on Advanced - matches the per-tab reset style. */
     .reset-all-defaults-btn {
       background: transparent;
       color: var(--text-muted);
@@ -939,7 +939,7 @@
           <h2>Refresh schedule</h2>
 
           <div class="lock-banner" id="refresh-schedule-lock-banner" hidden>
-            <span class="lock-banner-text"><span class="lock-banner-icon" aria-hidden="true">🔒</span><span>Locked — you've already started watching today.</span></span>
+            <span class="lock-banner-text"><span class="lock-banner-icon" aria-hidden="true">🔒</span><span>Locked - you've already started watching today.</span></span>
             <button type="button" class="unlock-trigger" data-target="refresh-schedule-section">Unlock to edit</button>
           </div>
 
@@ -1105,7 +1105,7 @@
           <p class="section-desc">Cap how many videos or how much time you can watch each day. Resets at the same hour as your weekly refresh.</p>
 
           <div class="lock-banner" id="daily-limit-lock-banner" hidden>
-            <span class="lock-banner-text"><span class="lock-banner-icon" aria-hidden="true">🔒</span><span>Locked — you've already started watching today.</span></span>
+            <span class="lock-banner-text"><span class="lock-banner-icon" aria-hidden="true">🔒</span><span>Locked - you've already started watching today.</span></span>
             <button type="button" class="unlock-trigger" data-target="daily-limit-section">Unlock to edit</button>
           </div>
 
@@ -1199,7 +1199,7 @@
 
         <div class="section">
           <h2>Reset all settings to defaults</h2>
-          <p class="section-desc">Reverts every BetterFeed setting on every tab to its installation default. Hidden videos, watched videos, daily watch progress, and the work session are untouched — only the settings change.</p>
+          <p class="section-desc">Reverts every BetterFeed setting on every tab to its installation default. Hidden videos, watched videos, daily watch progress, and the work session are untouched - only the settings change.</p>
           <button type="button" class="reset-all-defaults-btn">Reset all settings to defaults</button>
         </div>
       </section>
@@ -1224,7 +1224,7 @@
           <h2>Force-add video</h2>
           <input type="text" id="force-add-video-input" aria-label="YouTube URL or video ID" placeholder="YouTube URL or 11-char video ID" style="margin-bottom: 10px;" />
           <button id="force-add-video-btn">Add to weekly grid</button>
-          <div class="info-text">Adds the video as a stub (just the ID) to the weekly grid. The extension's normal metadata rebuild then fetches real title, channel, view count, duration, members-first flag, and avatar from YouTube — useful for testing detection without faking any data. After clicking Add, open or reload a YouTube tab on the weekly home to watch it fill in.</div>
+          <div class="info-text">Adds the video as a stub (just the ID) to the weekly grid. The extension's normal metadata rebuild then fetches real title, channel, view count, duration, members-first flag, and avatar from YouTube - useful for testing detection without faking any data. After clicking Add, open or reload a YouTube tab on the weekly home to watch it fill in.</div>
         </div>
 
         <div class="section">
@@ -1244,7 +1244,7 @@
             <button id="fake-now-apply-btn">Apply fake time</button>
             <button id="fake-now-clear-btn">Clear (use real time)</button>
           </div>
-          <div class="info-text">Shifts the extension's clock by a fixed offset so refresh logic runs as if it were that moment. Time still advances normally from there. Affects refresh scheduling only — does not change YouTube's own timestamps.</div>
+          <div class="info-text">Shifts the extension's clock by a fixed offset so refresh logic runs as if it were that moment. Time still advances normally from there. Affects refresh scheduling only - does not change YouTube's own timestamps.</div>
         </div>
 
         <div class="section">

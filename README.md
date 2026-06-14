@@ -9,7 +9,7 @@ You see the same videos until your scheduled refresh, so that **you can discover
 videos without all of the doomscrolling traps.**
 
 ## AI Usage Disclaimer
-To be completely transparent: **all** of this code was written using Claude Code Opus 4.7. I am not a web developer or software engineer — I work as a digital verification engineer and I understand web development to a certain degree, but truthfully, not to this level — *and* I am also extremely skeptical of and have a lot of very strong opinions about AI.
+To be completely transparent: **all** of this code was written using Claude Code Opus 4.7. I am not a web developer or software engineer - I work as a digital verification engineer and I understand web development to a certain degree, but truthfully, not to this level - *and* I am also extremely skeptical of and have a lot of very strong opinions about AI.
 
 I am also, however, very bothered by the fact that we have been unwittingly manipulated by massive social media and entertainment conglomerates that make money off of us by using psychological tricks to suck us in to spending unhealthy amounts of *our* time on their platforms.
 
@@ -46,7 +46,15 @@ Below is the actual README, now that I have gotten my schpiel out of the way.
 
 ## Install
 
-### From source — Chrome / Brave / Edge / any Chromium browser
+### From the Chrome Web Store
+
+[**Add BetterFeed to Chrome**](https://chromewebstore.google.com/detail/betterfeed/gigifojaifkgkgfckojjcgjfjpoeflfd) for Chrome, Brave, Edge, and any Chromium browser.
+
+### From Firefox Add-ons (AMO)
+
+Coming soon. A signed release is in review on [addons.mozilla.org](https://addons.mozilla.org/). Until then, use the from-source steps below.
+
+### From source - Chrome / Brave / Edge / any Chromium browser
 
 1. Clone or [download](https://github.com/IBN-5100-tan/BetterFeed-Chrome-Extension/archive/refs/heads/main.zip) this repo.
 2. Open `chrome://extensions`.
@@ -54,7 +62,7 @@ Below is the actual README, now that I have gotten my schpiel out of the way.
 4. Click **Load unpacked** and choose the folder **BetterFeed-Chrome-Extension-main**.
 5. The welcome page should open where you can configure settings and head to `youtube.com`.
 
-### From source — Firefox (121 or newer)
+### From source - Firefox (121 or newer)
 
 1. Clone or [download](https://github.com/IBN-5100-tan/BetterFeed-Chrome-Extension/archive/refs/heads/main.zip) this repo.
 2. Open `about:debugging#/runtime/this-firefox`.
@@ -62,18 +70,16 @@ Below is the actual README, now that I have gotten my schpiel out of the way.
 4. Visit `youtube.com`.
 
 Temporary add-ons are unloaded when you restart Firefox; reload with the
-same dialog. A signed release on addons.mozilla.org (AMO) is planned.
+same dialog. A signed release on addons.mozilla.org (AMO) is in review.
 
 > **Note on cross-browser sync.** Chrome's `chrome.storage.sync` and Firefox's
-> are separate ecosystems — settings, weekly grid, and hidden items do not
+> are separate ecosystems - settings, weekly grid, and hidden items do not
 > sync between, say, Chrome on your laptop and Firefox on your phone. Within
 > a single browser family (e.g., Chrome on two laptops, or Firefox on two
 > laptops), sync works the same way.
 
-### From the Chrome Web Store / Firefox Add-ons
-
-> Not yet published on either. See [CONTRIBUTING.md](CONTRIBUTING.md#publishing-to-the-chrome-web-store)
-> for the publish flow used by maintainers.
+> Maintainers: the release/publish flow lives in
+> [CONTRIBUTING.md](CONTRIBUTING.md#publishing-to-the-chrome-web-store).
 
 ---
 
@@ -147,7 +153,7 @@ Once you've started watching videos for the day, the **Refresh schedule** and
 | `*://www.youtube.com/*`   | The only host the content scripts and redirect rule touch.                 |
 
 The extension only contacts `youtube.com` (and its CDN `i.ytimg.com`
-for thumbnail images) — `oembed` for titles and channel names, watch
+for thumbnail images) - `oembed` for titles and channel names, watch
 pages for view count / duration / publish date, and channel pages for
 the channel avatar. No third-party servers, no analytics, no telemetry.
 See [PRIVACY.md](PRIVACY.md) for the full data-flow breakdown.
@@ -158,10 +164,10 @@ See [PRIVACY.md](PRIVACY.md) for the full data-flow breakdown.
 
 Two storage areas:
 
-- **`chrome.storage.local`** (per-device) — full state: settings, custom home page, 
+- **`chrome.storage.local`** (per-device) - full state: settings, custom home page, 
   hidden lists, watched videos, per-video playback progress,
   daily-state counters, work session.
-- **`chrome.storage.sync`** (cross-device) — a slim subset: settings, the
+- **`chrome.storage.sync`** (cross-device) - a slim subset: settings, the
   home page videos as ID-only, hidden lists, watched videos, and per-video
   positions. Other devices rebuild missing metadata via YouTube's oEmbed
   endpoint.
@@ -223,6 +229,23 @@ session state machines) live in [ARCHITECTURE.md](ARCHITECTURE.md).
 BetterFeed is licensed under the **GNU General Public License v3.0 or later**.
 See `LICENSE` for the full text. Anyone is free to use, modify, and
 redistribute it under the same terms.
+
+## Name and branding
+
+The **code** is GPLv3. You're free to use, modify, fork, and redistribute it
+under the same terms, no permission needed.
+
+The **"BetterFeed" name and icon are not covered by that license.** If you fork
+or redistribute, please ship it under a *different* name and icon so users can
+tell it apart from the official extension. Don't publish a copy to the Chrome
+Web Store, Firefox Add-ons, or anywhere else under the "BetterFeed" name, or a
+confusingly similar one, in a way that could be mistaken for the official build.
+
+The BetterFeed icon and logo artwork (the `icons/` files and any original
+BetterFeed branding) are the author's own work. They live in this repository so
+the extension can be built and run, but they are **not** licensed under the GPL
+and remain copyright reserved, © 2026 BetterFeed, all rights reserved. Third-party assets bundled here, such as the Open Source Initiative
+logo in `pictures/`, belong to their respective owners under their own terms.
 
 ## Contact
 

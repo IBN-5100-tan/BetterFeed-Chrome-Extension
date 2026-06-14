@@ -1,5 +1,5 @@
 // =============================================================================
-// background.js — service worker (Chrome) / event page (Firefox).
+// background.js - service worker (Chrome) / event page (Firefox).
 //
 // Three jobs:
 //
@@ -19,10 +19,10 @@
 //      the weekly home. It is installed for Watch + enabled and DECOUPLED from
 //      refresh-due (the refresh happens in place, so no native-home flash).
 //
-//   3. Lifecycle plumbing — first-install welcome tab, startup mode reset,
+//   3. Lifecycle plumbing - first-install welcome tab, startup mode reset,
 //      cross-device sync hydration.
 //
-// All state is read from chrome.storage via the helpers in shared.js — the
+// All state is read from chrome.storage via the helpers in shared.js - the
 // worker holds no state of its own across wake-ups except the in-flight lock.
 // =============================================================================
 
@@ -63,7 +63,7 @@ function isRefreshDue(refreshState) {
 // is intentionally DECOUPLED from refresh-due state: the background refreshes
 // the grid in place (no navigation), so youtube.com should always land on the
 // marker URL and let content.js render the (possibly stale, soon-refreshed)
-// grid — never flash the native home just because a refresh is due.
+// grid - never flash the native home just because a refresh is due.
 async function updateRedirectRule() {
   // Whole body guarded: getSettings()/getCurrentMode() read chrome.storage and
   // can reject transiently; this runs fire-and-forget from onChanged/alarms, so
@@ -152,7 +152,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     updateRedirectRule();
   }
   // Refresh check: anything that could flip "refresh due" (or re-enable Watch).
-  // NEVER trigger off STORAGE_REFRESH_STATUS_KEY — that's the refresh's own
+  // NEVER trigger off STORAGE_REFRESH_STATUS_KEY - that's the refresh's own
   // output and would loop.
   if (
     SETTINGS_KEY in changes ||
@@ -166,7 +166,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // Idempotent alarm setup. Previously this was a top-level
-// chrome.alarms.create which re-fires on every service-worker wake — each
+// chrome.alarms.create which re-fires on every service-worker wake - each
 // wake replaced the alarm and reset the 5-minute countdown, so during
 // active sessions the alarm could rarely fire and the "stale refresh-due"
 // safety net was effectively disabled. Now: check first, only create when
@@ -217,12 +217,12 @@ chrome.tabs.onRemoved.addListener(() => {
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
   // Without the "tabs" permission, changeInfo.url is only populated for
-  // host-permitted (youtube.com) URLs — a navigation AWAY from YouTube
+  // host-permitted (youtube.com) URLs - a navigation AWAY from YouTube
   // arrives with NO url. The old `if (!changeInfo.url) return` guard skipped
   // exactly the event this listener exists for, so the mode only ever
   // cleared on tab close, never on navigate-away.
   if (changeInfo.url) {
-    // Navigating to another YouTube URL — clearly not leaving YouTube. Skip
+    // Navigating to another YouTube URL - clearly not leaving YouTube. Skip
     // the cleanup check: Firefox can briefly report zero youtube.com tabs
     // mid-navigation, which would wipe the active mode and re-show the mode
     // picker on the return trip.
@@ -240,7 +240,7 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
 });
 
 // Promise-return listener pattern. In Firefox, returning a Promise from the
-// listener is the canonical async response — more reliable than the
+// listener is the canonical async response - more reliable than the
 // `return true; sendResponse(...)` callback pattern, which loses the response
 // if the event page suspends after the listener returns. Chromium supports it
 // too. The content script's only message is a fire-and-forget nudge to refresh
@@ -261,7 +261,7 @@ chrome.runtime.onMessage.addListener((msg, _sender) => {
 
 // ---- The refresh (background-owned, single path) ----
 // fetch youtube.com -> parse ytInitialData -> filter/pick -> save.
-// (No tab navigation, no DOM scrape — a pure background fetch + save.)
+// (No tab navigation, no DOM scrape - a pure background fetch + save.)
 // Guarded by an in-memory single-flight promise AND the persisted
 // STORAGE_REFRESH_STATUS_KEY (so a second wake or a second tab doesn't
 // double-fetch). On failure, refreshAfter is NOT advanced, so the next alarm
@@ -283,14 +283,14 @@ async function ensureFreshVideos(reason, { force = false } = {}) {
 }
 
 async function runRefresh(reason, { force = false } = {}) {
-  // Load the fake-now offset first so every refresh — regardless of which entry
-  // point woke the SW (message / alarm / startup / storage) — computes
+  // Load the fake-now offset first so every refresh - regardless of which entry
+  // point woke the SW (message / alarm / startup / storage) - computes
   // isRefreshDue, the in-flight/error cooldowns, and getNextRefreshTime against
   // the same (debug) clock. No-op when no offset is set (production).
   await loadFakeNowOffset();
   // Don't refresh until the user has completed onboarding. getSettings()
   // returns full defaults (enabled=true) even when nothing is stored, so we
-  // can't use it to detect a fresh/cleared profile — check the raw key. While
+  // can't use it to detect a fresh/cleared profile - check the raw key. While
   // SETTINGS_KEY is absent the content script is showing (or about to show)
   // the cold-start setup prompt; saving a grid now would make detectColdStart
   // return false and skip that prompt entirely. Once the user picks defaults /
@@ -325,7 +325,7 @@ async function runRefresh(reason, { force = false } = {}) {
   // refreshAfter, so without this it would re-issue a credentialed GET on
   // every alarm/storage-change/reload nudge. The 5-minute alarm still retries
   // once this cooldown elapses (cooldown < alarm period). A user-initiated
-  // force (options' refresh button) skips the backoff — only the cooldown,
+  // force (options' refresh button) skips the backoff - only the cooldown,
   // not the in-flight single-flight guard above.
   if (
     !force &&
@@ -339,7 +339,7 @@ async function runRefresh(reason, { force = false } = {}) {
 
   try {
     // Inside the try so a failing status write also lands in the catch's
-    // "error" branch — otherwise it could reject to a fire-and-forget caller
+    // "error" branch - otherwise it could reject to a fire-and-forget caller
     // and leave the status absent / wedged until the 60s TTL.
     await setRefreshStatus("refreshing", { startedAt: getNow(), reason });
     const html = await fetchYouTubeHomeHtml();
@@ -348,7 +348,7 @@ async function runRefresh(reason, { force = false } = {}) {
     let visible = filterHiddenVideos(parsed, hidden);
     if (settings.excludeLiveVideos !== false) {
       // Use the same predicate the renderer uses (content.js videoLooksLive),
-      // not just the raw isLive badge flag — otherwise past-live VODs/premieres
+      // not just the raw isLive badge flag - otherwise past-live VODs/premieres
       // the badge missed get saved, then silently dropped at render time,
       // shrinking the visible grid below videoCount.
       visible = visible.filter(v => !videoLooksLive(v));
@@ -357,7 +357,7 @@ async function runRefresh(reason, { force = false } = {}) {
       settings.videoCount + REFRESH_BACKFILL_BUFFER,
       MAX_WEEKLY_VIDEOS
     );
-    // `visible` is already filterHiddenVideos'd above — hidden filtering is
+    // `visible` is already filterHiddenVideos'd above - hidden filtering is
     // this caller's job by design (chooseWeeklyVideos only dedupes and picks).
     const chosen = chooseWeeklyVideos(visible, target);
     if (chosen.length === 0) throw new Error("0 usable videos parsed");
@@ -367,7 +367,7 @@ async function runRefresh(reason, { force = false } = {}) {
     await saveWeeklyVideosToStorage(chosen, getNextRefreshTime(settings));
     await setRefreshStatus("idle");
   } catch (err) {
-    // Do NOT advance refreshAfter — the next alarm/onChanged retries.
+    // Do NOT advance refreshAfter - the next alarm/onChanged retries.
     await setRefreshStatus("error", { failedAt: getNow(), reason: String(err?.message || err) });
   }
 }
@@ -375,7 +375,7 @@ async function runRefresh(reason, { force = false } = {}) {
 async function fetchYouTubeHomeHtml() {
   // Plain credentialed GET. The dNR redirect rule is main_frame-scoped, so it
   // does NOT match this fetch (classified as xmlhttprequest) on Chrome or
-  // Firefox — no rule drop/restore needed.
+  // Firefox - no rule drop/restore needed.
   const res = await fetch("https://www.youtube.com/", {
     credentials: "include",
     redirect: "follow"

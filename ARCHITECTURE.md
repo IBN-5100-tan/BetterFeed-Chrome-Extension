@@ -42,8 +42,8 @@ explains the implementation.
 The redirect rule fires at the network layer, before the request ever
 reaches a tab. When it's active, every visit to `youtube.com/` becomes a
 visit to `youtube.com/feed/library#better-feed-*`, which is just a normal
-YouTube page with a hash. Then at `document_start` — before any DOM is
-parsed — `early.js` notices the hash and sets `.better-feed-marker-mode`
+YouTube page with a hash. Then at `document_start` - before any DOM is
+parsed - `early.js` notices the hash and sets `.better-feed-marker-mode`
 on `<html>`; `preload.css` then hides every native child of `ytd-browse`
 (except our `#better-feed-home`) so the library content can't flash
 through. By the time content.js loads, the page is a blank canvas onto
@@ -52,7 +52,7 @@ which the weekly grid is drawn.
 The redirect rule turns off when the extension is disabled
 (`settings.enabled = false`). In Watch mode it also turns off when
 `settings.weeklyHomeEnabled` or `settings.redirectHomeEnabled` is off.
-It is intentionally **decoupled from refresh-due state** — the background
+It is intentionally **decoupled from refresh-due state** - the background
 refreshes the grid in place (a plain HTTP fetch, no navigation), so
 `youtube.com/` should always land on the marker URL and never flash the
 native home just because a refresh is pending.
@@ -85,7 +85,7 @@ Manifest V3. Lists:
 - The `key` field locks the extension ID so unpacked development and Web Store
   installs share the same ID. See [CONTRIBUTING.md](CONTRIBUTING.md#publishing-to-the-chrome-web-store).
 
-### `background.js` — service worker (Chrome) / event page (Firefox)
+### `background.js` - service worker (Chrome) / event page (Firefox)
 
 Idle until something wakes it. It **owns the entire weekly refresh** and
 keeps the redirect rule in sync:
@@ -101,7 +101,7 @@ keeps the redirect rule in sync:
    of `{state:"idle"|"refreshing"|"error"}`) prevents double-fetching across
    wake-ups and tabs. On failure it does **not** advance `refreshAfter`, so
    the next trigger retries. The dNR rule is main_frame-scoped, so this
-   `fetch` (an `xmlhttprequest`) is never redirected — no rule juggling.
+   `fetch` (an `xmlhttprequest`) is never redirected - no rule juggling.
 2. `updateRedirectRule()` reads `settings` + `mode`, decides whether the
    redirect rule should be installed, then calls
    `declarativeNetRequest.updateDynamicRules`. Decoupled from refresh-due.
@@ -114,7 +114,7 @@ keeps the redirect rule in sync:
 5. On `chrome.storage.onChanged` (local): recompute the rule on settings /
    mode / fake-time changes; call `ensureFreshVideos` on settings /
    `refreshAfter` / videos / mode / fake-time changes. The status key is
-   excluded from both (it's the refresh's own output — would loop). Sync
+   excluded from both (it's the refresh's own output - would loop). Sync
    changes route through `applySyncChangeToLocal()`.
 6. Every 5 minutes (`chrome.alarms` `better-feed-refresh-check`): recompute
    the rule and `ensureFreshVideos` (flips a stale "due" into a refresh).
@@ -126,7 +126,7 @@ keeps the redirect rule in sync:
    double-check to tolerate Firefox's transient zero-tab query).
 
 The worker holds no in-memory state across wake-ups except the in-flight
-refresh lock — everything else re-reads from `chrome.storage`.
+refresh lock - everything else re-reads from `chrome.storage`.
 
 ### `early.js` + `preload.css`
 
@@ -135,7 +135,7 @@ redirect rule) and `localStorage.betterFeedMode` (mirrored by `shared.js`) and
 applies a small set of `<html>` classes:
 
 - `better-feed-marker-mode` and `better-feed-pre-ready` on marker URLs
-  only — those whose hash is one of `#better-feed`, `#better-feed-watch`,
+  only - those whose hash is one of `#better-feed`, `#better-feed-watch`,
   `#better-feed-work`, or `#better-feed-listen`.
   `better-feed-pre-ready` keeps the app shell invisible until
   `content.js` calls `markModeReady()`, which fades it in over 220ms.
@@ -148,14 +148,14 @@ applies a small set of `<html>` classes:
   them, including on non-marker pages like `/watch`.
 - The last-known cleanup classes (`better-feed-hide-shorts`, …), replayed
   from the `betterFeedFeatureClasses` localStorage mirror that
-  `applyFeatureSettings()` writes — so features.css can hide Shorts /
+  `applyFeatureSettings()` writes - so features.css can hide Shorts /
   comments / watch-recs before first paint instead of flashing them in.
   Gated by `FEATURE_CLASSES_EARLY`, an exact-match allowlist mirroring
   content.js's `FEATURE_CLASS_SETTINGS` (update both when adding a
   cleanup toggle); content.js reconciles the real set once settings load.
 
 The CSS rules in `preload.css` are intentionally `!important` and use
-`html.<class>` ancestor selectors — they have to outrank YouTube's own
+`html.<class>` ancestor selectors - they have to outrank YouTube's own
 stylesheets without the benefit of the cascade.
 
 ### `shared.js`
@@ -166,7 +166,7 @@ The shared layer between every other script. Imported by:
 - The content scripts via `manifest.content_scripts[1].js`.
 - The popup and options pages via `<script src="shared.js">`.
 
-There are **no side effects at load time** — every function only runs when
+There are **no side effects at load time** - every function only runs when
 called. This is critical: if `shared.js` tried to attach listeners or write
 storage at load, the service worker would re-run them on every wake-up.
 
@@ -178,7 +178,7 @@ Key responsibilities:
   by `migrateLegacyStorageKeys()`.
 - **Settings sanitizer.** `sanitizeSettings()` is the single chokepoint that
   validates every field against `DEFAULT_SETTINGS`. Anything from disk passes
-  through it — if a future version adds a field, the sanitizer fills it in
+  through it - if a future version adds a field, the sanitizer fills it in
   on read.
 - **Mode storage.** `getCurrentMode` / `setCurrentMode` / `clearCurrentMode`,
   with a mirror to `localStorage` so `early.js` can read it synchronously.
@@ -188,11 +188,11 @@ Key responsibilities:
   `noGrace` flag.
 - **Hidden / watched / progress writers.** Each has its own write chain
   (`enqueueHiddenWrite`, `enqueueWatchedWrite`, `enqueueProgressWrite`, built
-  by `makeSerialQueue()`) — a `Promise` that serializes concurrent calls so
+  by `makeSerialQueue()`) - a `Promise` that serializes concurrent calls so
   two simultaneous writers can't clobber each other.
 - **Daily state.** `getDailyState`, `saveDailyState`, `isDailyLimitHit`.
   Syncs across devices as a CRDT (`mergeDailyState`) so the daily limit can't be
-  bypassed by switching devices — see the Daily limit section.
+  bypassed by switching devices - see the Daily limit section.
 - **`getNow()` / `loadFakeNowOffset()` / `applyFakeNowOffsetChange()`.** A
   whole-codebase substitute for `Date.now()` so the Debug page's fake-time
   feature can offset every timestamp. Every refresh / session / lock
@@ -227,16 +227,16 @@ completion, all roads lead to `update()`, which calls
    `renderSeeYouTomorrow()`.
 6. Otherwise, `renderFromStorage()` reads the stored grid + the background's
    refresh status and paints the grid, the "Refreshing…" loader, a quiet
-   retry message, or — when the saved set exists but can't render (every
-   video hidden, or every video flagged live) — an honest terminal message
+   retry message, or - when the saved set exists but can't render (every
+   video hidden, or every video flagged live) - an honest terminal message
    instead of a spinner that would never resolve. A pure read, no
    fetching/saving (see the refresh pipeline below).
 
 `onNonHomePage()` runs on `/watch`, `/results`, channel pages, etc. It
-doesn't replace anything — it just removes our injected style/grid (if
+doesn't replace anything - it just removes our injected style/grid (if
 present) and lets YouTube render. Feature toggles (autoplay, comments, etc.)
-are applied globally by `applyFeatureSettings()` — which toggles `better-feed-*`
-classes on `<html>` — with the matching rules in features.css (loaded by the
+are applied globally by `applyFeatureSettings()` - which toggles `better-feed-*`
+classes on `<html>` - with the matching rules in features.css (loaded by the
 manifest) regardless of page.
 
 ### `options.js` + `options.html`
@@ -267,7 +267,7 @@ in the install handler. Two CTAs: open settings, or jump to YouTube.
 ## The refresh pipeline
 
 The refresh is **owned entirely by the background** (`background.js`). It
-never navigates a tab and never touches the DOM — it fetches YouTube's home
+never navigates a tab and never touches the DOM - it fetches YouTube's home
 HTML directly and parses the JSON the page already embeds. content.js is a
 pure renderer that reacts to what the background stores.
 
@@ -277,23 +277,23 @@ pure renderer that reacts to what the background stores.
    fake-time), and a fire-and-forget `"better-feed-ensure-fresh"` nudge that
    content sends when it has no grid (covers the cold-start / event-page-asleep
    case). All of these are in-process reactions to top-level background
-   listeners — no cross-context message sits on the critical path.
+   listeners - no cross-context message sits on the critical path.
 
 2. **Guard + due-check (`runRefresh`).** Returns immediately unless Watch mode
    (or no mode yet) + `enabled` + `weeklyHomeEnabled`, and `isRefreshDue`. A
-   single-flight guard — an in-memory `refreshInFlight` promise plus a
+   single-flight guard - an in-memory `refreshInFlight` promise plus a
    persisted `STORAGE_REFRESH_STATUS_KEY` (`{state:"refreshing", startedAt}`
-   honored for `REFRESH_INFLIGHT_TTL_MS`) — prevents two wakes or two tabs
+   honored for `REFRESH_INFLIGHT_TTL_MS`) - prevents two wakes or two tabs
    from double-fetching.
 
 3. **Fetch + parse.** `fetchYouTubeHomeHtml()` is a plain
    `fetch("https://www.youtube.com/", {credentials:"include"})`. The dNR
    redirect rule is `main_frame`-scoped, so it does **not** match this fetch
-   (an `xmlhttprequest`) — no rule drop/restore needed.
+   (an `xmlhttprequest`) - no rule drop/restore needed.
    `extractVideosFromYouTubeHomeHtml()` (shared.js) walks the embedded
    `ytInitialData`, pulling each `lockupViewModel` into a complete video
    record (title, channel, avatar, duration, views, publish date, live flag).
-   No enrichment step — the parser already returns full objects.
+   No enrichment step - the parser already returns full objects.
 
 4. **Filter + pick + save.** `filterHiddenVideos()` strips hidden items;
    live broadcasts are dropped when `settings.excludeLiveVideos`;
@@ -306,7 +306,7 @@ pure renderer that reacts to what the background stores.
 5. **Status + render.** On success the status flips to `{state:"idle"}`; on
    failure to `{state:"error"}` **without advancing `refreshAfter`** (so the
    next alarm retries). The `STORAGE_VIDEOS_KEY` / status writes fire
-   `storage.onChanged` in every live tab — content's listener calls `update()`
+   `storage.onChanged` in every live tab - content's listener calls `update()`
    → `renderFromStorage()`, which swaps the loader for the freshly-stored
    grid. That `storage.onChanged` is the **only** render-notification channel;
    there are no retry timers or focus hooks.
@@ -316,11 +316,11 @@ The renderer's order encodes a deliberate asymmetry: it **live-filters the saved
 pool first**, then takes the first `videoCount` as the week's **fixed set**, then
 **hidden-filters** that set. So a late-detected live stream is *backfilled* from
 the reserve (you always get `videoCount` watchable videos), while **hiding shrinks
-the grid and never backfills** — once your week's videos are in place, hiding them
+the grid and never backfills** - once your week's videos are in place, hiding them
 must not surface new ones until the next scheduled refresh.
 
 > Historical note: refresh used to work by redirect-bouncing the tab to vanilla
-> `youtube.com`, DOM-scraping the rendered grid, and bouncing back — wrapped in
+> `youtube.com`, DOM-scraping the rendered grid, and bouncing back - wrapped in
 > cooldowns, retry timers, and sessionStorage flags. That was replaced by the
 > background HTTP-fetch design above; the JSON the server embeds is far more
 > stable than the rendered DOM, and there's no navigation to race.
@@ -352,7 +352,7 @@ from `chrome.storage.local` so the in-memory `currentMode` matches the
 canonical store.
 
 When the user opens YouTube fresh (typed URL, bookmark, external link)
-the mode picker re-prompts — see `isFreshTabNavigation()`. SPA navigations
+the mode picker re-prompts - see `isFreshTabNavigation()`. SPA navigations
 inside the same tab don't re-prompt.
 
 ---
@@ -364,7 +364,7 @@ Two flavors, both stored at `STORAGE_WORK_SESSION_KEY`:
 - **Timed:** `{ startedAt, endsAt, durationMinutes }`. Watch is locked
   until `endsAt`. Session auto-ends at `endsAt`.
 - **No-time:** `{ startedAt, noTime: true }`. No end. Watch lock is
-  dynamic — see below.
+  dynamic - see below.
 
 For no-time sessions, the lock window has three phases:
 
@@ -381,12 +381,12 @@ returns `lockStartsAt() + NO_TIME_LOCK_MS`. So the lock window is 20
 minutes long, beginning 15 seconds after the session starts.
 
 When the lock window is active, choosing Watch from the mode switcher
-opens the unlock challenge (`renderWorkUnlockModal`) — type a fresh 16–20
+opens the unlock challenge (`renderWorkUnlockModal`) - type a fresh 16-20
 digit code to release.
 
 A "no-grace" session (`noGrace: true`) skips the grace window entirely
 (`lockStartsAt()` returns `startedAt` directly). Set when starting a
-session from the **clock popover** or the **session-ended popup** — the
+session from the **clock popover** or the **session-ended popup** - the
 user is already mid-Work and re-committing, so there's no fat-finger
 window to protect.
 
@@ -400,12 +400,12 @@ next transition boundary and rebuilds the masthead chip when it fires.
 
 Tracks two counters per "day key":
 
-- `videoIds` — array of distinct video IDs started today.
-- `secondsByDevice` — `{ deviceId: seconds }`; total watch time =
+- `videoIds` - array of distinct video IDs started today.
+- `secondsByDevice` - `{ deviceId: seconds }`; total watch time =
   `dailyTotalSeconds()` = sum of the buckets.
 
 A "day" is delimited by the user's `refreshHour` setting. Before that hour,
-content.js treats the day as the previous calendar date — so a limit of "3
+content.js treats the day as the previous calendar date - so a limit of "3
 videos per day" with a refresh hour of 5am resets at 5am, not midnight.
 
 **Cross-device.** The daily state **syncs** so the limit roams (you can't bypass
@@ -428,29 +428,29 @@ The "5 more minutes"/"finish" grace stays **per-device** (re-decided on each).
 | `time`  | `dailyTotalSeconds(state) >= maxSecondsPerDay`          |
 | `both`  | Either of the above (whichever hits first).             |
 
-The takeover (`renderSeeYouTomorrow`) is owned by `onHomePage` — it
+The takeover (`renderSeeYouTomorrow`) is owned by `onHomePage` - it
 renders whenever the user lands on the Watch marker page with the limit
 hit and no grace. Two other code paths funnel into that takeover by
 navigating to the marker:
 
 - **During playback** (`tickWatchTracking`): when the projected
   `secondsWatched` would hit the limit, the player is paused and
-  `showDailyLimitPopup()` opens with four buttons — "1 more minute"
+  `showDailyLimitPopup()` opens with four buttons - "1 more minute"
   (`onGraceChosen("minutes", 60)`), "5 more minutes"
   (`onGraceChosen("minutes", 300)`), "Finish video"
   (`onGraceChosen("finish")`), and "Exit video"
   (calls `redirectToBlockedMarker()` directly).
 - **Arriving at `/watch`** (`maybeStartWatchTracking`): if the limit is
-  already hit and no grace is active — or starting a new video would
-  push `videoIds.length` past `maxVideosPerDay` — `redirectToBlockedMarker()`
+  already hit and no grace is active - or starting a new video would
+  push `videoIds.length` past `maxVideosPerDay` - `redirectToBlockedMarker()`
   navigates the tab to the Watch marker URL, where `onHomePage` then
   renders the takeover.
 
 The user can dismiss with a grace via `onGraceChosen("minutes", seconds)`
 or `onGraceChosen("finish")`. Graces are stored at
 `STORAGE_DAILY_GRACE_KEY` and time out via either
-`armGraceExpirationTimer` (minutes — fires a `setTimeout` at the
-expiration boundary) or `maybeEnforceGraceOnNavigation` (finish — also
+`armGraceExpirationTimer` (minutes - fires a `setTimeout` at the
+expiration boundary) or `maybeEnforceGraceOnNavigation` (finish - also
 catches expired minutes graces, re-checked on every SPA navigate). A
 "finish" grace is also auto-granted by `tickWatchTracking` when the
 video count limit is crossed mid-watch, so the user isn't pulled out of
@@ -461,7 +461,7 @@ the video they're currently watching.
 ## Watch tracking and auto-watched marking
 
 Two parallel tickers, both keyed off the `<video>` element on watch
-pages. They have different scopes — the daily-limit ticker runs for any
+pages. They have different scopes - the daily-limit ticker runs for any
 video, the watched-marking ticker only for videos in the current week's
 grid:
 
@@ -471,7 +471,7 @@ grid:
   ended / not-yet-ready frames, and discards seek jumps (`delta > 2s` or
   `delta <= 0`). Real watched seconds accumulate in
   `watchTrackPendingSeconds` and are flushed to this device's bucket in the
-  daily state's `secondsByDevice` every `WATCH_FLUSH_INTERVAL_MS` (5s) — not on
+  daily state's `secondsByDevice` every `WATCH_FLUSH_INTERVAL_MS` (5s) - not on
   every tick. After `VIDEO_COUNT_THRESHOLD_SEC` (5s) of playback, the video's
   ID is appended to `state.videoIds`; if that push crosses
   `maxVideosPerDay`, a `"finish"` grace is auto-granted for the current
@@ -491,7 +491,7 @@ grid:
 
 Progress is flushed to sync via `flushProgressToSync` on `pagehide` and
 on `stopWatchedMarking()` (when the watched ticker stops because the user
-navigated away or the video changed) — never on every tick. The flush
+navigated away or the video changed) - never on every tick. The flush
 also prunes stale entries (videos no longer in the current week's grid)
 before writing.
 
@@ -532,9 +532,9 @@ it via YouTube's oEmbed endpoint when the popup or options page renders.
 
 Sync caps:
 
-- `MAX_HIDDEN_PER_TYPE = 5000` — local cap.
+- `MAX_HIDDEN_PER_TYPE = 5000` - local cap.
 - `SYNC_HIDDEN_VIDEOS_CAP = 200`, `SYNC_HIDDEN_CHANNELS_CAP = 100`,
-  `SYNC_WATCHED_VIDEOS_CAP = 200` — the tail of the local list is shipped.
+  `SYNC_WATCHED_VIDEOS_CAP = 200` - the tail of the local list is shipped.
 
 `priorityWriteSync(items, { evictKeysInOrder })` retries a quota-exceeded
 sync set by progressively removing lower-priority keys.
@@ -551,7 +551,7 @@ sync set by progressively removing lower-priority keys.
 - **Daily state (`mergeDailyState`):** later day-key wins outright (new day
   resets); within the same day, `videoIds` union + per-device-bucket max on
   `secondsByDevice` (summed for the limit check). Each device writes only its
-  own bucket, so the cross-device total is exact — no double-count, no loss.
+  own bucket, so the cross-device total is exact - no double-count, no loss.
 
 ---
 
@@ -559,13 +559,13 @@ sync set by progressively removing lower-priority keys.
 
 On disk, hidden state lives in three keys: `STORAGE_HIDDEN_VIDEOS_KEY`
 and `STORAGE_HIDDEN_CHANNELS_KEY` (each an array of IDs / channel keys)
-and `STORAGE_HIDDEN_METADATA_KEY` — a single map keyed by both video IDs
+and `STORAGE_HIDDEN_METADATA_KEY` - a single map keyed by both video IDs
 and channel keys. Video entries look like `{type: "video", title,
 channelName}`; channel entries look like `{type: "channel", channelName}`.
 `getHiddenItems()` / `getHiddenItemsWithMetadata()` return them in memory
 as `{videos: Set, channels: Set, metadata}` for ergonomic membership tests.
 
-The metadata blob is local-only — when a fresh device hydrates, the
+The metadata blob is local-only - when a fresh device hydrates, the
 popup/options page calls `backfillMissingHiddenVideoMetadata()`, which
 hits `youtube.com/oembed` to recover titles + channels. The same trick
 fills in the weekly grid via `rebuildVideoMetadataIfNeeded()`
@@ -583,7 +583,7 @@ YouTube's edge.
 There are two CSS injection points:
 
 1. **`preload.css`** at `document_start`. Targets the native YouTube
-   shell — hides the home grid (always, unless
+   shell - hides the home grid (always, unless
    `better-feed-show-native-home` is set), the marker-page library
    content, the Work-mode sidebar, and (via `better-feed-pre-ready`)
    fades in the whole `ytd-app` once content.js has decided what to
@@ -630,12 +630,12 @@ cleared in storage; that function only re-enters cold start if
 
 - **No build step.** Everything is plain JS, no bundling, no transpilation.
   Edit a file, reload the unpacked extension, done. The trade-off is
-  that the codebase can't use modules — all files share a global scope.
+  that the codebase can't use modules - all files share a global scope.
 - **Single `update()` dispatcher.** Easier to reason about than a state
   machine class for the small number of UI states involved.
 - **Marker URL trick instead of an embedded WebView.** Reusing
   `/feed/library` means YouTube's app shell (masthead, sidebar, search,
-  player) all still work — we just hide the body content and inject our
+  player) all still work - we just hide the body content and inject our
   grid. Channel pages, watch pages, search, etc. are untouched.
 - **Sync ships IDs only for the weekly grid.** Cuts the per-grid sync
   blob by ~80% and keeps it under `chrome.storage.sync`'s 8 KB
@@ -649,5 +649,5 @@ cleared in storage; that function only re-enters cold start if
   one storage write. Critical for testing weekly/multi/daily refresh
   flows without waiting a calendar day.
 - **Friction-by-typing for unlock codes.** No paste, no autofill, no copy
-  from the displayed code. The point is to make the user pause — anything
+  from the displayed code. The point is to make the user pause - anything
   that lets them script the unlock defeats the feature.

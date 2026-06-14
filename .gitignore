@@ -1,4 +1,4 @@
-# Chrome Web Store signing key — NEVER commit. Anyone with this file can
+# Chrome Web Store signing key - NEVER commit. Anyone with this file can
 # publish updates to the extension under the maintainer's identity.
 *.pem
 

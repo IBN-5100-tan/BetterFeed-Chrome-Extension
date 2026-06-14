@@ -1,5 +1,5 @@
 // =============================================================================
-// shared.js — storage, settings, and cross-page primitives.
+// shared.js - storage, settings, and cross-page primitives.
 //
 // Loaded by every other script in the extension (content script, options page,
 // popup, service worker via importScripts). It owns:
@@ -10,9 +10,9 @@
 //   - Hidden-items, watched-videos, and per-video playback progress writers
 //   - The daily watch state (videos + seconds) used by the daily limit
 //   - The work-session state machine (timed vs no-time)
-//   - hydrateFromSync / applySyncChangeToLocal — the two halves of the
+//   - hydrateFromSync / applySyncChangeToLocal - the two halves of the
 //     local <-> sync reconciler
-//   - getNow() and loadFakeNowOffset() — fake-time injection for debug
+//   - getNow() and loadFakeNowOffset() - fake-time injection for debug
 //
 // There are no side effects at module load: nothing writes to storage, attaches
 // listeners, or touches the DOM. Each caller decides when to invoke things.
@@ -33,7 +33,7 @@ const STORAGE_MODE_KEY = "betterFeedSessionMode";
 const STORAGE_FAKE_NOW_OFFSET_KEY = "betterFeedFakeNowOffset";
 // Background-owned refresh status. Value: { state: "idle"|"refreshing"|"error",
 // startedAt?, failedAt?, reason? }. The content script reads it to decide
-// between the grid, the "Refreshing…" loader, and a quiet retry message —
+// between the grid, the "Refreshing…" loader, and a quiet retry message -
 // it is NEVER synced (transient, per-device) and must stay out of SYNC_KEYS.
 const STORAGE_REFRESH_STATUS_KEY = "betterFeedRefreshStatus";
 const MODE_LOCALSTORAGE_KEY = "betterFeedMode";
@@ -45,7 +45,7 @@ const STORAGE_DEVICE_ID_KEY = "betterFeedDeviceId";
 // One-shot rebrand migration: the chrome.storage keys and the localStorage
 // mode mirror were originally prefixed ytWeekly* (the project's old name).
 // If a device still has the old keys present, copy them to the new keys and
-// remove the old ones. Idempotent — once the old keys are gone this is a
+// remove the old ones. Idempotent - once the old keys are gone this is a
 // cheap no-op. Safe to call from any entry point's init path.
 const LEGACY_KEY_MAP = {
   ytWeeklySettings: SETTINGS_KEY,
@@ -79,7 +79,7 @@ async function migrateLegacyStorageKeys() {
     for (const [oldKey, newKey] of Object.entries(LEGACY_KEY_MAP)) {
       if (!(oldKey in stored)) continue;
       removes.push(oldKey);
-      // Don't clobber a value that's already at the new key — the destination
+      // Don't clobber a value that's already at the new key - the destination
       // is authoritative if both somehow coexist.
       let alreadyAtNew;
       try {
@@ -210,7 +210,7 @@ const MAX_WEEKLY_VIDEOS = 25;
 // Over-scrape reserve: the background saves settings.videoCount + this many
 // videos, all non-live / non-hidden AT SAVE TIME. The renderer drops any
 // late-detected live streams from the pool and THEN takes the first videoCount
-// as the week's FIXED set — so a live stream is BACKFILLED by a reserve video
+// as the week's FIXED set - so a live stream is BACKFILLED by a reserve video
 // (we always want videoCount watchable videos in place). Hiding is different: it
 // removes from the fixed set WITHOUT backfilling, so once your week's videos are
 // in place, hiding them must not surface new ones until the next refresh.
@@ -275,11 +275,11 @@ const SYNC_KEYS = [
   STORAGE_REFRESH_AFTER_KEY,
   STORAGE_HIDDEN_VIDEOS_KEY,
   STORAGE_HIDDEN_CHANNELS_KEY,
-  // STORAGE_HIDDEN_METADATA_KEY intentionally NOT synced — recovered on the
+  // STORAGE_HIDDEN_METADATA_KEY intentionally NOT synced - recovered on the
   // options/popup page via the YouTube oEmbed backfill (saves ~8 KB).
   STORAGE_WATCHED_VIDEOS_KEY,
   STORAGE_PROGRESS_KEY,
-  // Daily limit progress roams across devices (merged as a CRDT — see
+  // Daily limit progress roams across devices (merged as a CRDT - see
   // mergeDailyState) so the limit can't be bypassed by switching devices.
   STORAGE_DAILY_STATE_KEY
 ];
@@ -304,14 +304,14 @@ function expandChannelKey(key) {
 
 // Write-RATE limiting (MAX_WRITE_OPERATIONS_PER_MINUTE /
 // MAX_SUSTAINED_WRITE_OPERATIONS_PER_MINUTE). Distinct from capacity quota:
-// evicting keys cannot help — the eviction is itself another rate-limited
+// evicting keys cannot help - the eviction is itself another rate-limited
 // write. Treat as transient and never evict for it.
 function isWriteRateLimitError(err) {
   const msg = String(err?.message || err || "");
   return /MAX_(WRITE|SUSTAINED)/i.test(msg);
 }
 
-// Byte/item-capacity quota (QUOTA_BYTES, QUOTA_BYTES_PER_ITEM, MAX_ITEMS) —
+// Byte/item-capacity quota (QUOTA_BYTES, QUOTA_BYTES_PER_ITEM, MAX_ITEMS) -
 // the only failure class that evicting lower-priority keys can fix.
 // Chrome's rate-limit messages also contain the word "quota", so they must
 // be excluded explicitly.
@@ -363,9 +363,9 @@ async function priorityWriteSync(items, priority) {
       return false;
     }
   }
-  // Capacity quota exceeded — evict lower-priority keys and retry.
+  // Capacity quota exceeded - evict lower-priority keys and retry.
   // Defensive: evicting a key that the payload is about to re-write does
-  // nothing for the quota — the same bytes go right back. Drop any
+  // nothing for the quota - the same bytes go right back. Drop any
   // evict-list entry that overlaps the payload before we waste a round-trip.
   const payloadKeys = new Set(Object.keys(items));
   for (const key of priority.evictKeysInOrder) {
@@ -376,12 +376,12 @@ async function priorityWriteSync(items, priority) {
   return false;
 }
 
-// 16–20 digit numeric code used as the typed-confirmation challenge in both
+// 16-20 digit numeric code used as the typed-confirmation challenge in both
 // the work-session unlock (content.js) and the watching-lock unlock
 // (options.js). Long enough that copy-by-memory is annoying; short enough
 // that typing it is still feasible.
 function generateUnlockCode() {
-  const length = 16 + Math.floor(Math.random() * 5); // 16–20 inclusive
+  const length = 16 + Math.floor(Math.random() * 5); // 16-20 inclusive
   let code = "";
   for (let i = 0; i < length; i++) {
     code += String(Math.floor(Math.random() * 10));
@@ -390,7 +390,7 @@ function generateUnlockCode() {
 }
 
 // YouTube's public oEmbed endpoint. Used to recover a video's title,
-// channel name, and channel URL from just the videoId — needed in three
+// channel name, and channel URL from just the videoId - needed in three
 // places (the weekly grid in content.js after a sync hydrate, the popup's
 // hidden-items list, and the options page's hidden-items list), so it
 // lives in shared.js to keep them from drifting.
@@ -401,7 +401,7 @@ async function fetchVideoMetadataFromOEmbed(videoId) {
   try {
     const target = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
     const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(target)}&format=json`;
-    // credentials:"omit" — the oEmbed endpoint is public and needs no auth, and
+    // credentials:"omit" - the oEmbed endpoint is public and needs no auth, and
     // from the content script (same-origin on youtube.com) a bare fetch would
     // otherwise send the user's login cookies. Matches the watch/channel fetches.
     const resp = await fetch(url, { credentials: "omit" });
@@ -593,7 +593,7 @@ async function getDeviceId() {
     _deviceIdCache = id;
     return id;
   } catch (_) {
-    // Storage hiccup — return a UNIQUE ephemeral id. Do NOT poison _deviceIdCache
+    // Storage hiccup - return a UNIQUE ephemeral id. Do NOT poison _deviceIdCache
     // (so the next call re-attempts storage once it recovers) and never use a
     // shared literal (so two devices can't collide on one bucket and undercount
     // via mergeDailyState's per-key max).
@@ -732,13 +732,13 @@ function normalizeDailyOperand(s) {
 // already rolled into the next local day (timezone skew) can't wipe the day this
 // device is still accumulating; otherwise the later VALID day wins (a malformed
 // or implausible dayKey never beats a well-formed one, so it can't wipe local
-// progress). Same day: union videoIds + per-device-bucket max — each device only
+// progress). Same day: union videoIds + per-device-bucket max - each device only
 // increments its OWN bucket, so max is that device's latest and summing the
 // buckets gives the true cross-device total (can't be bypassed by switching
 // devices). Output is canonical (deduped/sorted) so the echo guards converge.
 function mergeDailyState(a, b, todayKey) {
   // Every exit goes through normalizeDailyOperand so the promise "output is
-  // canonical" holds on the single-winner paths too — a raw sync operand with
+  // canonical" holds on the single-winner paths too - a raw sync operand with
   // duplicate videoIds (inflating isDailyLimitHit's count) or a legacy
   // secondsWatched shape must not be written to local verbatim.
   if (!a || typeof a !== "object") return (b && typeof b === "object") ? normalizeDailyOperand(b) : null;
@@ -800,7 +800,7 @@ function isGraceActiveForLocation(grace, locationLike) {
     return getNow() < grace.expiresAt;
   }
   if (grace.type === "finish") {
-    // A finish grace with no videoId is stale/bogus — never treat it as active
+    // A finish grace with no videoId is stale/bogus - never treat it as active
     // (otherwise params.get("v")===null would match any v-less watch URL).
     if (!grace.videoId) return false;
     if (!locationLike || locationLike.pathname !== "/watch") return false;
@@ -837,13 +837,13 @@ async function getSettings() {
 }
 
 // Work session: a wall-clock commitment device. Two flavors:
-//  - Timed: `{ startedAt, endsAt, durationMinutes }` — Watch is locked until
+//  - Timed: `{ startedAt, endsAt, durationMinutes }` - Watch is locked until
 //    endsAt. Session ends automatically when endsAt is reached.
-//  - No-time: `{ startedAt, noTime: true }` — session has no end. Watch lock
+//  - No-time: `{ startedAt, noTime: true }` - session has no end. Watch lock
 //    is dynamic: a 15-second grace period after startedAt where the user can
 //    still bail, then a 20-minute lock window, then no lock (session itself
 //    keeps running until the user manually ends it).
-// Stored local-only — the session is a per-device focus state, not
+// Stored local-only - the session is a per-device focus state, not
 // cross-device coordination.
 async function getWorkSession() {
   const data = await chrome.storage.local.get([STORAGE_WORK_SESSION_KEY]);
@@ -859,7 +859,7 @@ async function setWorkSession({ minutes, noTime, noGrace } = {}) {
   const startedAt = getNow();
   if (noTime) {
     const session = { startedAt, noTime: true };
-    // No-grace sessions skip the 15-second grace window — the Watch lock
+    // No-grace sessions skip the 15-second grace window - the Watch lock
     // kicks in immediately. Used when starting a new session from the clock
     // popover or session-ended popup (i.e., the user is re-committing
     // mid-Work, no fat-finger window required).
@@ -944,7 +944,7 @@ async function persistHiddenState(state) {
   });
 
   const syncVideos = videoIds.slice(-SYNC_HIDDEN_VIDEOS_CAP);
-  // Strip the YouTube origin from channel URLs for sync — expanded again on
+  // Strip the YouTube origin from channel URLs for sync - expanded again on
   // hydrate. Keeps the per-item blob small.
   const syncChannels = channelIds
     .slice(-SYNC_HIDDEN_CHANNELS_CAP)
@@ -967,7 +967,7 @@ async function persistHiddenState(state) {
       ]
     }
   );
-  // Drop any legacy metadata blob left over in sync from older builds —
+  // Drop any legacy metadata blob left over in sync from older builds -
   // we now rebuild via the oEmbed backfill instead of carrying it through.
   // (safeSyncRemove catches internally and never rejects.)
   safeSyncRemove([STORAGE_HIDDEN_METADATA_KEY]);
@@ -1033,7 +1033,7 @@ async function getVideoProgressMap() {
 
 const enqueueProgressWrite = makeSerialQueue();
 
-// Locally, progress entries are `{ position, duration }` in seconds — duration
+// Locally, progress entries are `{ position, duration }` in seconds - duration
 // is convenient for fast bar rendering without re-parsing the formatted
 // duration string from the weekly video meta.
 // In sync we only carry the position (a bare number) since duration is
@@ -1078,7 +1078,7 @@ function slimProgressForSync(map) {
   for (const [videoId, entry] of Object.entries(map || {})) {
     if (!videoId) continue;
     if (isValidProgressEntry(entry)) {
-      // Round to integer seconds — the bar is sub-pixel anyway.
+      // Round to integer seconds - the bar is sub-pixel anyway.
       out[videoId] = Math.round(entry.position);
     }
   }
@@ -1140,9 +1140,9 @@ function mergeProgressMaps(localMap, incomingMap) {
 
 // Push the current local progress map up to sync. Chained behind any in-flight
 // local writes so the snapshot we ship is the latest. Only meant to run on
-// "exit" signals (SPA-navigate away, pagehide) — not on every tick.
+// "exit" signals (SPA-navigate away, pagehide) - not on every tick.
 //
-// Also prunes entries against the current week's grid before writing — both
+// Also prunes entries against the current week's grid before writing - both
 // to local and sync. Sync hydration uses max-style merge, which can't represent
 // deletion, so stale entries from past weeks would otherwise creep back in and
 // re-ship to sync. This pruning is the single chokepoint that keeps both
@@ -1169,7 +1169,7 @@ function flushProgressToSync() {
     }
     if (Object.keys(pruned).length === 0) return;
 
-    // Sync ships positions as bare numbers — duration is recoverable from the
+    // Sync ships positions as bare numbers - duration is recoverable from the
     // weekly grid at render time.
     const slim = slimProgressForSync(pruned);
     await priorityWriteSync(
@@ -1209,7 +1209,7 @@ function videoLooksLive(video) {
   if (/\bpremieres?\s+(in|at|on)\b/i.test(meta)) return true;
   if (/\bscheduled\s+for\b/i.test(meta)) return true;
   if (/\bstarted\s+streaming\b/i.test(meta)) return true;
-  // Past live stream replays — YouTube tags them with "Streamed N units ago"
+  // Past live stream replays - YouTube tags them with "Streamed N units ago"
   // OR "Streamed live N units ago" (the latter form appears for some replays
   // and locales). Still require a digit before "ago" so a stray title-bleed
   // containing the word "streamed" can't false-positive a regular video.
@@ -1225,7 +1225,7 @@ function videoLooksLive(video) {
 }
 
 // Build a stub video object from just an ID. Used when sync only carries IDs
-// (the slim format) — title/channelName/etc. are populated later by the
+// (the slim format) - title/channelName/etc. are populated later by the
 // oEmbed rebuild on the content script side. Thumbnails work without
 // metadata because their URLs are derived from the videoId directly.
 function stubVideoFromId(videoId) {
@@ -1283,11 +1283,11 @@ async function saveWeeklyVideosToStorage(videos, refreshAfter) {
     }
   );
 
-  // New week's grid is in storage — last week's watched flags are now stale,
+  // New week's grid is in storage - last week's watched flags are now stale,
   // so flush them. Routed through modifyWatched so it serializes against any
   // in-flight user-driven watched write and also clears the synced copy.
   await modifyWatched(set => set.clear());
-  // Same goes for per-video playback progress — including the synced copy.
+  // Same goes for per-video playback progress - including the synced copy.
   // Hydration merges sync progress back into local (max-position, no delete
   // signal), so a stale prior-week map left in sync would creep back into
   // local until a watch-tab flush happened to prune it.
@@ -1441,7 +1441,7 @@ async function pushLocalToSyncIfMissing(sync) {
     Object.keys(local[STORAGE_PROGRESS_KEY]).length > 0
   ) {
     // Same wire shape as flushProgressToSync: prune to the current weekly grid
-    // and ship bare-number positions — never the raw local {position, duration}
+    // and ship bare-number positions - never the raw local {position, duration}
     // map (fatter payload, and stale prior-week entries would re-enter sync).
     const weeklyIds = new Set(
       (Array.isArray(local[STORAGE_VIDEOS_KEY]) ? local[STORAGE_VIDEOS_KEY] : [])
@@ -1485,11 +1485,11 @@ async function currentDayKey() {
   return getDailyDayKey(await getSettings());
 }
 
-// Push the local daily state to sync — called debounced/immediately from the
+// Push the local daily state to sync - called debounced/immediately from the
 // watch tab (see content.js scheduleDailyStateSync). Reads sync FIRST and pushes
 // the MERGE so a concurrent peer's bucket is never clobbered (matches the other
 // three daily-state sync paths). allowEvict only on the enforcement-critical
-// immediate push — a routine seconds bump must not evict the durable weekly
+// immediate push - a routine seconds bump must not evict the durable weekly
 // grid / watched / progress keys (they'd just re-push on the next hydrate = pure
 // thrash for a 1-second counter delta).
 async function pushDailyStateToSync({ allowEvict = false } = {}) {
@@ -1514,7 +1514,7 @@ async function pushDailyStateToSync({ allowEvict = false } = {}) {
 // local write) interleaving between its reads and its final write would let
 // the later write clobber the earlier merge, losing hidden/watched IDs or
 // settings. Route every invocation through this chain so they run one at a
-// time — same pattern as modifyHidden/modifyWatched.
+// time - same pattern as modifyHidden/modifyWatched.
 let _syncChangeChain = Promise.resolve();
 function queueSyncChange(changes) {
   _syncChangeChain = _syncChangeChain.then(
@@ -1662,7 +1662,7 @@ async function applySyncChangeToLocal(changes) {
 /* ---------- HTTP-FETCH HOME PARSER ---------- */
 // Used by the primary refresh path (HTTP fetch of youtube.com instead of
 // the visible bounce + DOM scrape). The fetch itself runs in the background
-// script — content-script fetch is unreliable in Firefox (privacy/tracking
+// script - content-script fetch is unreliable in Firefox (privacy/tracking
 // protection treats the extension-origin fetch as cross-origin and
 // intermittently aborts it). Background returns the raw HTML; parsing lives
 // here so the same code is reachable from background, content, and tests.
@@ -1696,7 +1696,7 @@ function parseLockupViewModel(lockup) {
 
   // metadataRows[0] is the channel row; metadataRows[1] is "views • date".
   // YouTube very occasionally inserts an extra row (chapters, "Recommended
-  // for you" reason) — identify content by regex on the text, not by index.
+  // for you" reason) - identify content by regex on the text, not by index.
   const rows = meta.metadata?.contentMetadataViewModel?.metadataRows || [];
   let channelName = "";
   let channelUrl = "";
@@ -1723,7 +1723,7 @@ function parseLockupViewModel(lockup) {
       }
       // Require a digit so a channel byline that fell through the URL-gated
       // branch above (a channel row YouTube shipped without a tap URL) can't be
-      // misread as a stat — e.g. a channel named "Chicago" matching /ago/ or
+      // misread as a stat - e.g. a channel named "Chicago" matching /ago/ or
       // "Tech Reviews" matching /views/. Real view/date strings always carry a
       // number ("1.2M views", "3 days ago", "Premiered Jan 5, 2024").
       if (!views && /\d/.test(text) && /views|watching/i.test(text)) { views = text; continue; }
@@ -1736,7 +1736,7 @@ function parseLockupViewModel(lockup) {
   const metadata = views && date ? `${views} • ${date}` : (views || date || "");
 
   // Duration / live badge sits in the thumbnail bottom overlay. "LIVE",
-  // "PREMIERE", or "UPCOMING" text here means the video itself is live —
+  // "PREMIERE", or "UPCOMING" text here means the video itself is live -
   // distinct from the channel's live ring on the avatar (decoratedAvatarViewModel
   // .liveData.liveBadgeText) which only signals the channel is live, possibly
   // on a different video.
@@ -1774,7 +1774,7 @@ function parseLockupViewModel(lockup) {
 // Full pipeline: HTML response from youtube.com → ytInitialData JSON →
 // walk for lockupViewModel nodes → per-lockup parse → deduped video array.
 // Throws if ytInitialData isn't present in the response (no match for the
-// regex — typical with a consent wall, 429, or a fundamentally different
+// regex - typical with a consent wall, 429, or a fundamentally different
 // page).
 function extractVideosFromYouTubeHomeHtml(html) {
   const m = html.match(YT_INITIAL_DATA_RE);
@@ -1783,7 +1783,7 @@ function extractVideosFromYouTubeHomeHtml(html) {
 
   // Track whether we're inside a richSectionRenderer subtree: those are
   // YouTube's injected shelf sections ("Breaking news", Trending, Shorts
-  // shelves, …) — editorial/topical content, NOT the user's recommendation
+  // shelves, …) - editorial/topical content, NOT the user's recommendation
   // feed (feed videos are richItemRenderers sitting directly in the grid).
   // Shelf videos are collected separately and only used as a defensive
   // fallback: if YouTube restructures the page so nothing parses outside a
@@ -1817,7 +1817,7 @@ function extractVideosFromYouTubeHomeHtml(html) {
   return videos;
 }
 
-/* ---------- WEEKLY GRID — PURE HELPERS (shared by background + content) ---------- */
+/* ---------- WEEKLY GRID - PURE HELPERS (shared by background + content) ---------- */
 // These live here (not content.js) because the background owns the refresh:
 // it filters/picks videos before saving. They are pure (no DOM, no chrome.*
 // beyond getStoredWeeklyVideos) so both contexts can call them.
@@ -1913,7 +1913,7 @@ function filterHiddenVideos(videos, hidden) {
 // Pick the weekly grid: dedupe, prefer fully-populated entries (have
 // view-count metadata + avatar + duration) then backfill to videoCount.
 // Hidden filtering is the CALLER's job (background.js pre-filters the pool
-// with filterHiddenVideos before choosing) — no hidden param here, so the
+// with filterHiddenVideos before choosing) - no hidden param here, so the
 // filter can't silently run twice.
 function chooseWeeklyVideos(videos, videoCount) {
   const seen = new Set();
@@ -1981,9 +1981,9 @@ function channelDisplayFromKey(key) {
 }
 
 // Backfill titles for hidden videos whose metadata didn't survive (typical
-// after a reinstall — the hidden ID lists sync, their metadata blob doesn't).
+// after a reinstall - the hidden ID lists sync, their metadata blob doesn't).
 // ONE copy shared by options.js and popup.js (they were verbatim duplicates,
-// differing only in which list re-render they triggered — hence onUpdated).
+// differing only in which list re-render they triggered - hence onUpdated).
 // Results persist via modifyHidden so the next render reads them from storage
 // and the recovered metadata syncs back across devices. Ids with no oEmbed
 // data (deleted/private/age-gated) are negative-cached via _oembedFailed so

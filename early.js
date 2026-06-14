@@ -1,9 +1,9 @@
 // =============================================================================
-// early.js — runs at document_start, before any YouTube DOM parses.
+// early.js - runs at document_start, before any YouTube DOM parses.
 //
 // Its only job is to put the right classes on <html> so that preload.css can
 // hide the native home grid / sidebar / app shell before the user ever sees
-// them. Anti-flash work only — no logic, no fetches.
+// them. Anti-flash work only - no logic, no fetches.
 //
 // preload.css is loaded by the same manifest content_scripts entry and carries
 // all the CSS rules. This file just decides which mode classes to apply by
@@ -28,7 +28,7 @@ if (MARKER_HASHES_EARLY.indexOf(location.hash) !== -1) {
 // signal on marker pages (set by the dNR redirect rule). For non-marker
 // pages (e.g., /watch, /results) the URL has no hash, so fall back to
 // localStorage to still apply mode classes before content.js loads.
-// Falls back to the legacy localStorage key for one load post-rebrand —
+// Falls back to the legacy localStorage key for one load post-rebrand -
 // shared.js's migration runs in content.js after this and clears the old key.
 let earlyMode = null;
 if (location.hash === "#better-feed-watch") earlyMode = "watch";
@@ -44,7 +44,7 @@ else {
 
 // Listen is work-like (content.js's isWorkLikeMode treats it as Work and
 // applies better-feed-work-mode), so it must get the same anti-flash class
-// here — otherwise the native grid/sidebar/mini-guide flash on every load
+// here - otherwise the native grid/sidebar/mini-guide flash on every load
 // for a Listen user until content.js reconciles.
 if (earlyMode === "work" || earlyMode === "listen") {
   document.documentElement.classList.add("better-feed-work-mode");
@@ -58,7 +58,7 @@ if (earlyMode === "work" || earlyMode === "listen") {
 // comments / Shorts before first paint instead of flashing them in; content.js
 // reconciles the exact set once it has read settings.
 //
-// Exact-match allowlist, mirrored from FEATURE_CLASS_SETTINGS in content.js —
+// Exact-match allowlist, mirrored from FEATURE_CLASS_SETTINGS in content.js -
 // update both when adding a cleanup toggle. A bare "better-feed-" prefix check
 // would also admit state classes from a tampered value (e.g.
 // better-feed-pre-ready, which hides the whole app shell until content.js's
